@@ -50,6 +50,7 @@ import {
 import { cronParser } from "./cronParser.js";
 import { interpolate, interpolateAll } from "./template.js";
 import { notifyTransition, previousOutcome, transitionFor } from "./failure-notify.js";
+import { runWithRetries } from "./retry.js";
 
 // ── JSON migration ──────────────────────────────────────────
 
@@ -178,6 +179,114 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
     if (transition) void notifyTransition(ctx, task, transition, error);
   }
 
+  /**
+   * Run a task's action once. Returns exec output for the history; throws on
+   * failure. Retries call this again, so it must not touch the execution row's
+   * status.
+   */
+  async function runAction(
+    task: ScheduledTask,
+    execId: string,
+    taskLog: ReturnType<ExtensionContext["createLogger"]>,
+  ): Promise<string | undefined> {
+    if (!ctx) return undefined;
+    let execOutput: string | undefined;
+    switch (task.action.type) {
+      case "emit":
+        ctx.emit(task.action.target, {
+          taskId: task.id,
+          taskName: task.name,
+          ...task.action.payload,
+        });
+        break;
+
+      case "notification":
+        ctx.emit("scheduler.notification", {
+          taskId: task.id,
+          taskName: task.name,
+          message: interpolate(task.action.target, task),
+          ...task.action.payload,
+        });
+        break;
+
+      case "extension_call":
+        await ctx.call(task.action.target, task.action.payload ?? {});
+        break;
+
+      case "exec": {
+        const payload = task.action.payload ?? {};
+        const rawArgs = (payload.args as string[]) ?? [];
+        const useShell = (payload.shell as boolean) ?? false;
+        const rawCwd = (payload.cwd as string) ?? undefined;
+        const timeoutMs = (payload.timeoutMs as number) ?? 60_000;
+        const customEnv = (payload.env as Record<string, string>) ?? {};
+
+        // Interpolate template variables in command, args, and cwd
+        const target = interpolate(task.action.target, task);
+        const args = interpolateAll(rawArgs, task);
+        const cwd = rawCwd ? interpolate(rawCwd, task) : undefined;
+
+        const cmd = useShell ? ["sh", "-c", [target, ...args].join(" ")] : [target, ...args];
+
+        // Merge env: parent process env + custom payload env + auto-injected anima vars
+        const env: Record<string, string> = {
+          ...(process.env as Record<string, string>),
+          ...customEnv,
+          ANIMA_TASK_ID: task.id,
+          ANIMA_EXECUTION_ID: execId,
+        };
+
+        ctx.log.info(`Exec task started: ${task.name}`, { id: task.id, cwd, timeoutMs });
+        taskLog.info("Exec command", {
+          command: cmd.join(" "),
+          cwd,
+          timeoutMs,
+          execId,
+        });
+
+        const proc = Bun.spawn(cmd, {
+          cwd,
+          env,
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+
+        // Race against timeout
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const timeoutPromise = new Promise<"timeout">((resolve) => {
+          timer = setTimeout(() => resolve("timeout"), timeoutMs);
+        });
+        const exitPromise = proc.exited.then((code) => ({ code }));
+        const result = await Promise.race([exitPromise, timeoutPromise]);
+        clearTimeout(timer);
+
+        if (result === "timeout") {
+          proc.kill();
+          throw new Error(`Process timed out after ${timeoutMs}ms`);
+        }
+
+        const stdout = await new Response(proc.stdout).text();
+        const stderr = await new Response(proc.stderr).text();
+        const exitCode = result.code;
+
+        // Capture output for execution history (truncate to 4KB)
+        const combined = [stdout.trim(), stderr.trim()].filter(Boolean).join("\n---\n");
+        if (combined) execOutput = combined.slice(0, 4096);
+
+        if (exitCode !== 0) {
+          throw new Error(
+            `Process exited with code ${exitCode}${stderr ? `\n${stderr.slice(0, 500)}` : ""}`,
+          );
+        }
+
+        if (stdout.trim()) taskLog.info("exec stdout", { text: stdout.trim().slice(0, 4000) });
+        if (stderr.trim()) taskLog.warn("exec stderr", { text: stderr.trim().slice(0, 4000) });
+        break;
+      }
+    }
+    return execOutput;
+  }
+
   // ── Fire a single task ─────────────────────────────────────
 
   async function fireTask(task: ScheduledTask): Promise<void> {
@@ -214,96 +323,25 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
     let execOutput: string | undefined;
 
     try {
-      switch (task.action.type) {
-        case "emit":
-          ctx.emit(task.action.target, {
-            taskId: task.id,
-            taskName: task.name,
-            ...task.action.payload,
-          });
-          break;
-
-        case "notification":
-          ctx.emit("scheduler.notification", {
-            taskId: task.id,
-            taskName: task.name,
-            message: interpolate(task.action.target, task),
-            ...task.action.payload,
-          });
-          break;
-
-        case "extension_call":
-          await ctx.call(task.action.target, task.action.payload ?? {});
-          break;
-
-        case "exec": {
-          const payload = task.action.payload ?? {};
-          const rawArgs = (payload.args as string[]) ?? [];
-          const useShell = (payload.shell as boolean) ?? false;
-          const rawCwd = (payload.cwd as string) ?? undefined;
-          const timeoutMs = (payload.timeoutMs as number) ?? 60_000;
-          const customEnv = (payload.env as Record<string, string>) ?? {};
-
-          // Interpolate template variables in command, args, and cwd
-          const target = interpolate(task.action.target, task);
-          const args = interpolateAll(rawArgs, task);
-          const cwd = rawCwd ? interpolate(rawCwd, task) : undefined;
-
-          const cmd = useShell ? ["sh", "-c", [target, ...args].join(" ")] : [target, ...args];
-
-          // Merge env: parent process env + custom payload env + auto-injected anima vars
-          const env: Record<string, string> = {
-            ...(process.env as Record<string, string>),
-            ...customEnv,
-            ANIMA_TASK_ID: task.id,
-            ANIMA_EXECUTION_ID: execId,
-          };
-
-          ctx.log.info(`Exec task started: ${task.name}`, { id: task.id, cwd, timeoutMs });
-          taskLog.info("Exec command", {
-            command: cmd.join(" "),
-            cwd,
-            timeoutMs,
-            execId,
-          });
-
-          const proc = Bun.spawn(cmd, {
-            cwd,
-            env,
-            stdout: "pipe",
-            stderr: "pipe",
-          });
-
-          // Race against timeout
-          const timeoutPromise = new Promise<"timeout">((resolve) =>
-            setTimeout(() => resolve("timeout"), timeoutMs),
-          );
-          const exitPromise = proc.exited.then((code) => ({ code }));
-          const result = await Promise.race([exitPromise, timeoutPromise]);
-
-          if (result === "timeout") {
-            proc.kill();
-            throw new Error(`Process timed out after ${timeoutMs}ms`);
-          }
-
-          const stdout = await new Response(proc.stdout).text();
-          const stderr = await new Response(proc.stderr).text();
-          const exitCode = result.code;
-
-          // Capture output for execution history (truncate to 4KB)
-          const combined = [stdout.trim(), stderr.trim()].filter(Boolean).join("\n---\n");
-          if (combined) execOutput = combined.slice(0, 4096);
-
-          if (exitCode !== 0) {
-            throw new Error(
-              `Process exited with code ${exitCode}${stderr ? `\n${stderr.slice(0, 500)}` : ""}`,
-            );
-          }
-
-          if (stdout.trim()) taskLog.info("exec stdout", { text: stdout.trim().slice(0, 4000) });
-          if (stderr.trim()) taskLog.warn("exec stderr", { text: stderr.trim().slice(0, 4000) });
-          break;
-        }
+      const run = await runWithRetries(
+        () => runAction(task, execId, taskLog),
+        task.retries,
+        task.retryDelaySeconds,
+        {
+          onRetry: ({ attempt, attempts, delayMs, error }) => {
+            const reason = String(error)
+              .replace(/^Error:\s*/, "")
+              .split("\n")[0];
+            const message = `Attempt ${attempt} of ${attempts} failed (${reason}). Retrying in ${Math.round(delayMs / 1000)}s`;
+            updateExecutionProgress(execId, message);
+            ctx?.log.warn(`Retrying task: ${task.name}`, { id: task.id, attempt, delayMs });
+            taskLog.warn(message);
+          },
+        },
+      );
+      execOutput = run.result;
+      if (run.attempts > 1) {
+        updateExecutionProgress(execId, `Succeeded on attempt ${run.attempts}`);
       }
 
       const durationMs = Math.round(performance.now() - startMs);
@@ -431,6 +469,21 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
           .describe(
             "Output directory pattern for {{task.output_dir}}. Supports template variables. Default: ~/.anima/tasks/<slug>/YYYY/MM/",
           ),
+        retries: z
+          .number()
+          .int()
+          .min(0)
+          .max(10)
+          .default(0)
+          .describe(
+            "Extra attempts after a failed run before it counts as failed and notifies. Only for actions safe to repeat.",
+          ),
+        retryDelaySeconds: z
+          .number()
+          .int()
+          .min(1)
+          .default(10)
+          .describe("Wait before the first retry; doubles for each retry after it (max 10 min)"),
       }),
     },
     {
@@ -454,6 +507,8 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
         tags: z.array(z.string()).optional(),
         keepHistory: z.number().optional(),
         outputDir: z.string().optional(),
+        retries: z.number().int().min(0).max(10).optional(),
+        retryDelaySeconds: z.number().int().min(1).optional(),
         enabled: z.boolean().optional(),
       }),
     },
@@ -533,6 +588,8 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
           tags,
           keepHistory = 50,
           outputDir,
+          retries = 0,
+          retryDelaySeconds = 10,
         } = params as {
           name: string;
           description?: string;
@@ -552,6 +609,8 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
           tags?: string[];
           keepHistory?: number;
           outputDir?: string;
+          retries?: number;
+          retryDelaySeconds?: number;
         };
 
         // Compute fire time
@@ -589,6 +648,8 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
           firedCount: 0,
           keepHistory,
           outputDir,
+          retries,
+          retryDelaySeconds,
         };
 
         insertTask(task);
@@ -630,6 +691,8 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
           tags?: string[];
           keepHistory?: number;
           outputDir?: string;
+          retries?: number;
+          retryDelaySeconds?: number;
         };
 
         const existing = getTaskById(taskId);

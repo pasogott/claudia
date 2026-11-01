@@ -17,6 +17,8 @@ const mockTask: ScheduledTask = {
   firedCount: 5,
   lastFiredAt: "2026-03-21T00:00:00.000Z",
   keepHistory: 50,
+  retries: 0,
+  retryDelaySeconds: 10,
 };
 
 describe("template interpolation", () => {

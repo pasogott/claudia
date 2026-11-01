@@ -32,6 +32,8 @@ interface Task {
   concurrency?: string;
   tags?: string[];
   createdAt: string;
+  retries: number;
+  retryDelaySeconds: number;
 }
 
 interface Execution {
@@ -42,6 +44,7 @@ interface Execution {
   durationMs?: number;
   error?: string;
   output?: string;
+  progressMessage?: string | null;
 }
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -449,6 +452,11 @@ function TaskCard({ task, onFire, onCancel, onToggle, onViewHistory }: TaskCardP
           <span className="text-zinc-400 font-mono">{task.action.target}</span>
           {task.firedCount > 0 && <span className="ml-2">· fired {task.firedCount}×</span>}
           {task.lastFiredAt && <span className="ml-1">· last {formatTime(task.lastFiredAt)}</span>}
+          {task.retries > 0 && (
+            <span className="ml-1">
+              · retries {task.retries}× from {task.retryDelaySeconds}s
+            </span>
+          )}
         </div>
 
         {/* Exec details */}
@@ -596,6 +604,9 @@ function HistoryPanel({ taskName, executions, onClose }: HistoryPanelProps) {
                   {exec.status}
                 </span>
               </div>
+              {exec.progressMessage && (
+                <div className="mt-1 ml-8 text-xs text-zinc-500">{exec.progressMessage}</div>
+              )}
               {exec.error && <div className="mt-1 ml-8 text-xs text-red-400/70">{exec.error}</div>}
               {exec.output && (
                 <details className="mt-1 ml-8">

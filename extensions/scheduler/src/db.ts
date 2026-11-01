@@ -55,6 +55,8 @@ interface TaskRow {
   last_fired_at: string | null;
   keep_history: number;
   output_dir: string | null;
+  retries: number;
+  retry_delay_seconds: number;
 }
 
 export interface ExecutionRow {
@@ -95,6 +97,10 @@ export interface ScheduledTask {
   keepHistory: number;
   /** Output directory pattern with template variables. Resolved and auto-created via {{task.output_dir}}. */
   outputDir?: string;
+  /** Extra attempts after a failed run, before it counts as failed (and notifies). */
+  retries: number;
+  /** Wait before the first retry; doubles for each one after it. */
+  retryDelaySeconds: number;
 }
 
 // ── Row ↔ Task conversion ───────────────────────────────────
@@ -123,6 +129,8 @@ function rowToTask(row: TaskRow): ScheduledTask {
     lastFiredAt: row.last_fired_at ?? undefined,
     keepHistory: row.keep_history,
     outputDir: row.output_dir ?? undefined,
+    retries: row.retries,
+    retryDelaySeconds: row.retry_delay_seconds,
   };
 }
 
@@ -135,8 +143,9 @@ export function insertTask(task: ScheduledTask): void {
        (id, name, description, type, fire_at, interval_seconds, cron_expr,
         action_type, action_target, action_payload,
         missed_policy, concurrency, start_deadline_seconds,
-        enabled, tags, created_at, fired_count, last_fired_at, keep_history, output_dir)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        enabled, tags, created_at, fired_count, last_fired_at, keep_history, output_dir,
+        retries, retry_delay_seconds)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       task.id,
@@ -159,6 +168,8 @@ export function insertTask(task: ScheduledTask): void {
       task.lastFiredAt ?? null,
       task.keepHistory,
       task.outputDir ?? null,
+      task.retries,
+      task.retryDelaySeconds,
     );
 }
 
@@ -222,6 +233,8 @@ export function updateTask(
       | "tags"
       | "keepHistory"
       | "outputDir"
+      | "retries"
+      | "retryDelaySeconds"
     >
   >,
 ): void {
@@ -279,6 +292,14 @@ export function updateTask(
   if (updates.outputDir !== undefined) {
     setClauses.push("output_dir = ?");
     values.push(updates.outputDir);
+  }
+  if (updates.retries !== undefined) {
+    setClauses.push("retries = ?");
+    values.push(updates.retries);
+  }
+  if (updates.retryDelaySeconds !== undefined) {
+    setClauses.push("retry_delay_seconds = ?");
+    values.push(updates.retryDelaySeconds);
   }
 
   if (setClauses.length === 0) return;
