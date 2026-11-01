@@ -61,7 +61,7 @@
     "bun-plugin-tailwind": "catalog:",
     "bun-types": "1.4.4",
     "husky": "9.1.7",
-    "lint-staged": "16.4.0",
+    "lint-staged": "17.6.0",
     "oxfmt": "0.74.0",
     "oxlint": "1.90.0",
     "react-doctor": "0.9.18",
