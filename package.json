@@ -43,7 +43,7 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "catalog:",
-    "@google/genai": "1.46.0",
+    "@google/genai": "2.32.0",
     "dockview": "5.1.0",
     "dockview-react": "5.1.0",
     "fuzzysort": "4.0.2",
