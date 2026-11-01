@@ -535,7 +535,8 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
     },
     {
       name: "scheduler.fire_now",
-      description: "Immediately execute a task (ignoring its schedule)",
+      description:
+        "Start a task now (ignoring its schedule) and return without waiting; follow it with get_history",
       inputSchema: z.object({
         taskId: z.string(),
       }),
@@ -783,7 +784,11 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
         const task = getTaskById(taskId);
         if (!task) throw new Error(`Task not found: ${taskId}`);
 
-        await fireTask(task);
+        // Start it and return: a run with retries can take minutes, and this
+        // extension serves one method at a time. Follow it with get_history.
+        void fireTask(task).catch((err) =>
+          ctx?.log.error(`fire_now failed: ${task.name}`, { id: task.id, error: String(err) }),
+        );
         return { ok: true, taskId, firedAt: new Date().toISOString() };
       }
 
