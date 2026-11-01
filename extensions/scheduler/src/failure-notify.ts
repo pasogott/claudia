@@ -3,40 +3,38 @@
  *
  * A failure that only lands in the execution history is invisible: Wings
  * failed every morning for weeks on Anima Sedes before anyone looked. So a
- * finished run is compared with the task's previous finished run, and only
+ * finished run is compared with the task's earlier finished runs, and only
  * the transitions are news:
  *
- *   success (or first run) → error   "failed"
- *   error                  → success "recovered"
+ *   the Nth error in a row (N = alertAfterFailures, default 1)   "failed"
+ *   a success after an alerted streak                            "recovered"
  *
  * Not every failure: the lights task runs every five minutes, and a broken one
- * would otherwise text him all night.
+ * would otherwise text him all night. A task can also wait for several failed
+ * runs in a row (`alertAfterFailures`) before it says anything, for flaky
+ * things like a light on weak Wi-Fi.
  */
 
 import type { ExtensionContext } from "@anima/shared";
 
-export type RunOutcome = "success" | "error";
 export type Transition = "failed" | "recovered";
 
-/** Statuses that count as a finished run (not running, not skipped). */
-const FINISHED = new Set<string>(["success", "error"]);
-
-export function transitionFor(
-  previous: string | undefined,
-  current: RunOutcome,
-): Transition | null {
-  const before = previous && FINISHED.has(previous) ? previous : undefined;
-  if (current === "error" && before !== "error") return "failed";
-  if (current === "success" && before === "error") return "recovered";
-  return null;
+/** How many runs at the front of `outcomes` failed in a row. */
+function errorStreak(outcomes: string[]): number {
+  const firstOk = outcomes.findIndex((o) => o !== "error");
+  return firstOk === -1 ? outcomes.length : firstOk;
 }
 
-/** The previous finished run's status, skipping the run that just ended. */
-export function previousOutcome(
-  executions: Array<{ id: string; status: string }>,
-  currentExecId: string,
-): string | undefined {
-  return executions.find((e) => e.id !== currentExecId && FINISHED.has(e.status))?.status;
+/**
+ * `outcomes` are the task's finished runs, newest first, the run that just
+ * ended included. A failure is news once, when the streak reaches
+ * `alertAfter`; recovery is news only if that alert went out.
+ */
+export function transitionFor(outcomes: string[], alertAfter: number): Transition | null {
+  const [current, ...earlier] = outcomes;
+  if (current === "error") return errorStreak(outcomes) === alertAfter ? "failed" : null;
+  if (current === "success") return errorStreak(earlier) >= alertAfter ? "recovered" : null;
+  return null;
 }
 
 /** First line of an error, trimmed to what fits in a text message. */

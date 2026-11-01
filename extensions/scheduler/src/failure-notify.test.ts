@@ -1,40 +1,38 @@
 import { describe, expect, it } from "bun:test";
 import type { ExtensionContext } from "@anima/shared";
-import { notifyTransition, previousOutcome, transitionFor } from "./failure-notify";
+import { notifyTransition, transitionFor } from "./failure-notify";
 
 describe("transitionFor", () => {
-  it("reports the first failure", () => {
-    expect(transitionFor(undefined, "error")).toBe("failed");
-    expect(transitionFor("success", "error")).toBe("failed");
+  // Outcomes are newest first, the run that just ended included.
+  it("reports the first failure by default", () => {
+    expect(transitionFor(["error"], 1)).toBe("failed");
+    expect(transitionFor(["error", "success"], 1)).toBe("failed");
   });
 
   it("stays quiet while a task keeps failing", () => {
-    expect(transitionFor("error", "error")).toBeNull();
+    expect(transitionFor(["error", "error"], 1)).toBeNull();
+    expect(transitionFor(["error", "error", "error"], 2)).toBeNull();
   });
 
   it("reports recovery, and nothing for a healthy streak", () => {
-    expect(transitionFor("error", "success")).toBe("recovered");
-    expect(transitionFor("success", "success")).toBeNull();
-    expect(transitionFor(undefined, "success")).toBeNull();
+    expect(transitionFor(["success", "error"], 1)).toBe("recovered");
+    expect(transitionFor(["success", "success"], 1)).toBeNull();
+    expect(transitionFor(["success"], 1)).toBeNull();
   });
 
-  it("ignores runs that never finished", () => {
-    expect(transitionFor("skipped", "error")).toBe("failed");
-    expect(transitionFor("running", "success")).toBeNull();
+  it("waits for N failures in a row when alertAfter is N", () => {
+    expect(transitionFor(["error", "success", "success"], 2)).toBeNull();
+    expect(transitionFor(["error", "error", "success"], 2)).toBe("failed");
   });
-});
 
-describe("previousOutcome", () => {
-  it("skips the current run and unfinished runs", () => {
-    const history = [
-      { id: "now", status: "error" },
-      { id: "a", status: "skipped" },
-      { id: "b", status: "running" },
-      { id: "c", status: "error" },
-      { id: "d", status: "success" },
-    ];
-    expect(previousOutcome(history, "now")).toBe("error");
-    expect(previousOutcome([{ id: "now", status: "error" }], "now")).toBeUndefined();
+  it("only reports recovery from a streak that was alerted", () => {
+    expect(transitionFor(["success", "error", "success"], 2)).toBeNull();
+    expect(transitionFor(["success", "error", "error"], 2)).toBe("recovered");
+  });
+
+  it("does not miss a failure when history is short", () => {
+    expect(transitionFor(["error", "error"], 2)).toBe("failed");
+    expect(transitionFor(["error"], 2)).toBeNull();
   });
 });
 

@@ -34,6 +34,7 @@ interface Task {
   createdAt: string;
   retries: number;
   retryDelaySeconds: number;
+  alertAfterFailures: number;
 }
 
 interface Execution {
@@ -456,6 +457,9 @@ function TaskCard({ task, onFire, onCancel, onToggle, onViewHistory }: TaskCardP
             <span className="ml-1">
               · retries {task.retries}× from {task.retryDelaySeconds}s
             </span>
+          )}
+          {task.alertAfterFailures > 1 && (
+            <span className="ml-1">· alerts after {task.alertAfterFailures} failures</span>
           )}
         </div>
 

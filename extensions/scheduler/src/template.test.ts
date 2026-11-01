@@ -19,6 +19,7 @@ const mockTask: ScheduledTask = {
   keepHistory: 50,
   retries: 0,
   retryDelaySeconds: 10,
+  alertAfterFailures: 1,
 };
 
 describe("template interpolation", () => {

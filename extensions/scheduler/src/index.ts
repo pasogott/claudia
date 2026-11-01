@@ -37,6 +37,7 @@ import {
   getEnabledDueTasks,
   getExecutionsForTask,
   getLatestRunningExecution,
+  getRecentOutcomes,
   getTaskById,
   insertExecution,
   insertTask,
@@ -49,7 +50,7 @@ import {
 } from "./db.js";
 import { cronParser } from "./cronParser.js";
 import { interpolate, interpolateAll } from "./template.js";
-import { notifyTransition, previousOutcome, transitionFor } from "./failure-notify.js";
+import { notifyTransition, transitionFor } from "./failure-notify.js";
 import { runWithRetries } from "./retry.js";
 
 // ── JSON migration ──────────────────────────────────────────
@@ -167,15 +168,11 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
    * Notify Michael if this run changed the task's state (first failure, or
    * recovery). Fire-and-forget: a slow relay must never delay the scheduler.
    */
-  function reportTransition(
-    task: ScheduledTask,
-    execId: string,
-    outcome: "success" | "error",
-    error?: string,
-  ): void {
+  function reportTransition(task: ScheduledTask, error?: string): void {
     if (!ctx) return;
-    const previous = previousOutcome(getExecutionsForTask(task.id, 10), execId);
-    const transition = transitionFor(previous, outcome);
+    // One more than the threshold, so a streak already past it stays quiet.
+    const outcomes = getRecentOutcomes(task.id, task.alertAfterFailures + 1);
+    const transition = transitionFor(outcomes, task.alertAfterFailures);
     if (transition) void notifyTransition(ctx, task, transition, error);
   }
 
@@ -346,7 +343,7 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
 
       const durationMs = Math.round(performance.now() - startMs);
       completeExecution(execId, "success", durationMs, undefined, execOutput);
-      reportTransition(task, execId, "success");
+      reportTransition(task);
       ctx.log.info(`Scheduled task completed: ${task.name}`, {
         id: task.id,
         durationMs,
@@ -368,7 +365,7 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
     } catch (error) {
       const durationMs = Math.round(performance.now() - startMs);
       completeExecution(execId, "error", durationMs, String(error));
-      reportTransition(task, execId, "error", String(error));
+      reportTransition(task, String(error));
       ctx.log.error(`Failed to fire task: ${task.name}`, { id: task.id, error: String(error) });
       taskLog.error("Task failed", { durationMs, error: String(error) });
     } finally {
@@ -484,6 +481,13 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
           .min(1)
           .default(10)
           .describe("Wait before the first retry; doubles for each retry after it (max 10 min)"),
+        alertAfterFailures: z
+          .number()
+          .int()
+          .min(1)
+          .max(10)
+          .default(1)
+          .describe("Consecutive failed runs before Michael is notified"),
       }),
     },
     {
@@ -509,6 +513,7 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
         outputDir: z.string().optional(),
         retries: z.number().int().min(0).max(10).optional(),
         retryDelaySeconds: z.number().int().min(1).optional(),
+        alertAfterFailures: z.number().int().min(1).max(10).optional(),
         enabled: z.boolean().optional(),
       }),
     },
@@ -590,6 +595,7 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
           outputDir,
           retries = 0,
           retryDelaySeconds = 10,
+          alertAfterFailures = 1,
         } = params as {
           name: string;
           description?: string;
@@ -611,6 +617,7 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
           outputDir?: string;
           retries?: number;
           retryDelaySeconds?: number;
+          alertAfterFailures?: number;
         };
 
         // Compute fire time
@@ -650,6 +657,7 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
           outputDir,
           retries,
           retryDelaySeconds,
+          alertAfterFailures,
         };
 
         insertTask(task);
@@ -693,6 +701,7 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
           outputDir?: string;
           retries?: number;
           retryDelaySeconds?: number;
+          alertAfterFailures?: number;
         };
 
         const existing = getTaskById(taskId);
@@ -756,6 +765,7 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
             createdAt: t.createdAt,
             retries: t.retries,
             retryDelaySeconds: t.retryDelaySeconds,
+            alertAfterFailures: t.alertAfterFailures,
           })),
           count: tasks.length,
         };

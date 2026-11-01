@@ -57,6 +57,7 @@ interface TaskRow {
   output_dir: string | null;
   retries: number;
   retry_delay_seconds: number;
+  alert_after_failures: number;
 }
 
 export interface ExecutionRow {
@@ -101,6 +102,8 @@ export interface ScheduledTask {
   retries: number;
   /** Wait before the first retry; doubles for each one after it. */
   retryDelaySeconds: number;
+  /** Consecutive failed runs before Michael is notified (1 = the first failure). */
+  alertAfterFailures: number;
 }
 
 // ── Row ↔ Task conversion ───────────────────────────────────
@@ -131,6 +134,7 @@ function rowToTask(row: TaskRow): ScheduledTask {
     outputDir: row.output_dir ?? undefined,
     retries: row.retries,
     retryDelaySeconds: row.retry_delay_seconds,
+    alertAfterFailures: row.alert_after_failures,
   };
 }
 
@@ -144,8 +148,8 @@ export function insertTask(task: ScheduledTask): void {
         action_type, action_target, action_payload,
         missed_policy, concurrency, start_deadline_seconds,
         enabled, tags, created_at, fired_count, last_fired_at, keep_history, output_dir,
-        retries, retry_delay_seconds)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        retries, retry_delay_seconds, alert_after_failures)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       task.id,
@@ -170,6 +174,7 @@ export function insertTask(task: ScheduledTask): void {
       task.outputDir ?? null,
       task.retries,
       task.retryDelaySeconds,
+      task.alertAfterFailures,
     );
 }
 
@@ -235,6 +240,7 @@ export function updateTask(
       | "outputDir"
       | "retries"
       | "retryDelaySeconds"
+      | "alertAfterFailures"
     >
   >,
 ): void {
@@ -301,6 +307,10 @@ export function updateTask(
     setClauses.push("retry_delay_seconds = ?");
     values.push(updates.retryDelaySeconds);
   }
+  if (updates.alertAfterFailures !== undefined) {
+    setClauses.push("alert_after_failures = ?");
+    values.push(updates.alertAfterFailures);
+  }
 
   if (setClauses.length === 0) return;
 
@@ -351,6 +361,19 @@ export function getExecutionsForTask(taskId: string, limit = 50): ExecutionRow[]
        LIMIT ?`,
     )
     .all(taskId, limit) as ExecutionRow[];
+}
+
+/** Statuses of the task's finished runs (success or error), newest first. */
+export function getRecentOutcomes(taskId: string, limit: number): string[] {
+  const rows = getDb()
+    .query(
+      `SELECT status FROM scheduler_task_executions
+       WHERE task_id = ? AND status IN ('success', 'error')
+       ORDER BY fired_at DESC
+       LIMIT ?`,
+    )
+    .all(taskId, limit) as Array<{ status: string }>;
+  return rows.map((r) => r.status);
 }
 
 /**

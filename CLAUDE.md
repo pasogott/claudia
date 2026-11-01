@@ -327,7 +327,7 @@ External services reach Anima at `https://webhooks.kiliman.dev/hook/<name>/<secr
 `notify.send({ message, title?, source? })` is how anything reaches Michael when he isn't looking. Each host either **delivers** (`delivery: { type: "imessage", to }`: Anima Sedes, whose iMessage lands on his phone and Mac at once) or **relays** (`delivery: { type: "relay", url, token }`: vesuvius forwards to Sedes' `notify.send` over Tailscale at `wss://gateway.anima-sedes.com/ws`, one hop at most). Identical text within 10 minutes is sent once.
 
 - The scheduler calls it on a task's **first failure** and on its **recovery**, never on every failed run.
-- A task with `retries > 0` (`scheduler.add_task` / `update_task`, plus `retryDelaySeconds`, default 10, doubling) retries inside the same execution first, so a blip such as wifi dropping never counts as a failure. Only for actions that are safe to repeat.
+- A task with `retries > 0` (`scheduler.add_task` / `update_task`, plus `retryDelaySeconds`, default 10, doubling) retries inside the same execution first, so a blip such as wifi dropping never counts as a failure. Only for actions that are safe to repeat. `alertAfterFailures: N` waits for N failed runs in a row before notifying (the lights tasks use 2).
 - Use it from scripts with `anima notify send --message "…" --source <who>`.
 - A reply to a notification arrives with it. The iMessage bridge never adds a notification to the session (it would wake her and read as Michael's prompt). Instead, when his next message comes in, it puts anything sent from her account outside the session in front of it. A per-chat cursor plus her remembered replies keep anything from showing up twice (`extensions/imessage/src/outside-messages.ts`).
 
