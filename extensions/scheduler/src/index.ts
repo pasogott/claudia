@@ -754,6 +754,8 @@ export function createSchedulerExtension(_config: Record<string, unknown> = {}):
             concurrency: t.concurrency,
             tags: t.tags,
             createdAt: t.createdAt,
+            retries: t.retries,
+            retryDelaySeconds: t.retryDelaySeconds,
           })),
           count: tasks.length,
         };
