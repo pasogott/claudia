@@ -129,6 +129,14 @@ is reached two ways:
   title, and sends the prompt in one call. A scheduled task uses this to start a
   session Michael can open later. `name` also works for child spawns. Without
   it, the title falls back to the first prompt.
+- **A session hands off its own work** — `anima session handoff --title "…" --promptFile tmp/x/HANDOFF.md`
+  (or `--prompt`), instead of compacting. `sessionId` comes from `$ANIMA_SESSION_ID`. The new session
+  takes the caller's workspace, agent, model and profile (override with `--targetCwd`, `--model`,
+  `--profile`), is titled, and starts on the prompt. The two are linked (`previous_session_id` on the
+  new row, `metadata.handedOffTo` on the old one) and the caller is resolved. The server emits
+  `session.<caller>.handoff` on the caller's own stream, so only clients showing it follow: the web
+  chat navigates, embedded clients adopt it in place, iOS voice mode retargets. A session hands off
+  once. Code: `extensions/session/src/lifecycle/session-handoff.ts`.
 
 ### Session permission profiles
 
@@ -376,7 +384,7 @@ A Linear-lite across projects. A **ticket** is one problem; **reports** are the 
 
 **Gateway methods**: `gateway.list_methods`, `gateway.list_extensions`, `gateway.list_web_contributions`, `gateway.subscribe`, `gateway.unsubscribe`, `gateway.register_extension`, `gateway.restart_extension`, plus the liveness-lock set (`acquire_liveness_lock`, `renew_liveness_lock`, `release_liveness_lock`, `list_liveness_locks`)
 
-**Session methods**: `session.create_session`, `session.send_prompt`, `session.get_history`, `session.switch_session`, `session.list_sessions`, `session.interrupt_session`, `session.close_session`, `session.reset_session`, `session.get_info`, `session.set_permission_mode`, `session.send_tool_result`
+**Session methods**: `session.create_session`, `session.send_prompt`, `session.handoff`, `session.get_history`, `session.switch_session`, `session.list_sessions`, `session.interrupt_session`, `session.close_session`, `session.reset_session`, `session.get_info`, `session.set_permission_mode`, `session.send_tool_result`
 
 **Sub-agent methods**: `session.spawn_agent`, `session.list_subagents`, `session.get_subagent`, `session.interrupt_subagent` — provider-agnostic delegation (codex code review, tests, etc.)
 
