@@ -138,6 +138,8 @@ export class SessionRegistry {
         agent: existing?.agent ?? "claude",
         purpose: existing?.purpose ?? "chat",
         parentSessionId: existing?.parentSessionId ?? null,
+        // Agent-host runs the process, so its folder is the real one.
+        cwd: session.cwd,
         runtimeStatus,
         lastActivity: existing?.lastActivity ?? session.lastActivity,
       });

@@ -2,6 +2,7 @@ import type { PersistedState } from "./state";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { claudeProjectSlug } from "@anima/shared";
 
 type SessionResumer = {
   resume: (params: {
@@ -21,8 +22,7 @@ type RestoreLogger = {
 
 function resolveSessionPath(sessionId: string, cwd: string): string | null {
   const projectsDir = join(process.env.HOME ?? homedir(), ".claude", "projects");
-  const encodedCwd = cwd.replace(/\//g, "-");
-  const directPath = join(projectsDir, encodedCwd, `${sessionId}.jsonl`);
+  const directPath = join(projectsDir, claudeProjectSlug(cwd), `${sessionId}.jsonl`);
   if (existsSync(directPath)) return directPath;
 
   if (!existsSync(projectsDir)) return null;

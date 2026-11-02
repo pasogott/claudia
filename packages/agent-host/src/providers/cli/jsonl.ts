@@ -23,11 +23,7 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-
-/** Claude Code encodes a cwd into its project dir by replacing `/` and `.` with `-`. */
-export function encodeCwd(cwd: string): string {
-  return cwd.replace(/[/.]/g, "-");
-}
+import { claudeProjectSlug } from "@anima/shared";
 
 /**
  * Absolute path to our own session's JSONL transcript. Tries the canonical
@@ -37,7 +33,7 @@ export function encodeCwd(cwd: string): string {
  */
 export function resolveOwnSessionPath(cwd: string, sessionId: string): string {
   const projectsDir = join(homedir(), ".claude", "projects");
-  const canonical = join(projectsDir, encodeCwd(cwd), `${sessionId}.jsonl`);
+  const canonical = join(projectsDir, claudeProjectSlug(cwd), `${sessionId}.jsonl`);
   if (existsSync(canonical)) return canonical;
   const legacy = join(projectsDir, cwd.replace(/\//g, "-"), `${sessionId}.jsonl`);
   if (legacy !== canonical && existsSync(legacy)) return legacy;

@@ -1,14 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { classifyEntry, encodeCwd, resolveOwnSessionPath } from "./jsonl";
-
-describe("encodeCwd", () => {
-  test("replaces / and . with -", () => {
-    expect(encodeCwd("/Users/me/.hammerspoon")).toBe("-Users-me--hammerspoon");
-    expect(encodeCwd("/Users/michael/Projects/iamclaudia-ai/anima")).toBe(
-      "-Users-michael-Projects-iamclaudia-ai-anima",
-    );
-  });
-});
+import { classifyEntry, resolveOwnSessionPath } from "./jsonl";
 
 describe("resolveOwnSessionPath", () => {
   test("builds canonical ~/.claude/projects/<enc>/<id>.jsonl when nothing exists", () => {

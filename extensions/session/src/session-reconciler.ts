@@ -142,6 +142,8 @@ export function reconcileWorkspace(cwd: string, workspaceId: string): number {
       model: rt.sessionConfig.model,
       agent: "claude",
       purpose: "chat",
+      // The folder whose transcript directory this came from.
+      cwd,
       // Deliberately no runtime status. The reconciler reads transcripts off
       // disk; it knows nothing about what the agent is doing right now, and
       // asserting `idle` here was resetting the live status of every session it

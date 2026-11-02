@@ -26,7 +26,7 @@ import {
   realpathSync,
   statSync,
 } from "node:fs";
-import { createLogger } from "@anima/shared";
+import { claudeProjectSlug, createLogger } from "@anima/shared";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 
@@ -152,8 +152,7 @@ function normalizePathForTraversal(path: string): string {
 
 function hasPersistedClaudeSession(cwd: string, sessionId: string): boolean {
   const projectsDir = join(homedir(), ".claude", "projects");
-  const encodedCwd = cwd.replace(/\//g, "-");
-  const directPath = join(projectsDir, encodedCwd, `${sessionId}.jsonl`);
+  const directPath = join(projectsDir, claudeProjectSlug(cwd), `${sessionId}.jsonl`);
   if (existsSync(directPath)) return true;
 
   if (!existsSync(projectsDir)) return false;

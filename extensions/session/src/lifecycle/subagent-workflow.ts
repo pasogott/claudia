@@ -44,7 +44,7 @@ export function toSessionSubagentFromStored(stored: StoredSession | null): Sessi
     subagentId: stored.id,
     parentSessionId: stored.parentSessionId,
     agent: stored.agent,
-    cwd: typeof metadata.cwd === "string" ? metadata.cwd : undefined,
+    cwd: stored.cwd ?? (typeof metadata.cwd === "string" ? metadata.cwd : undefined),
     prompt: typeof metadata.prompt === "string" ? metadata.prompt : "",
     purpose,
     status: toSubagentStatus(stored.runtimeStatus),
@@ -135,6 +135,7 @@ export async function spawnSubagent(
     agent,
     purpose: params.purpose,
     parentSessionId: params.parentSessionId,
+    cwd: effectiveCwd,
     runtimeStatus: "running",
     metadata: {
       ...(params.metadata || {}),
@@ -180,6 +181,7 @@ export async function spawnSubagent(
       agent,
       purpose: params.purpose,
       parentSessionId: params.parentSessionId,
+      cwd: effectiveCwd,
       runtimeStatus: "failed",
       metadata: {
         ...(params.metadata || {}),

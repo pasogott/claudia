@@ -220,6 +220,7 @@ async function ensureSessionBootstrapped(params: {
     agent: params.agent,
     purpose: params.purpose || "chat",
     parentSessionId: params.parentSessionId,
+    cwd: params.cwd,
     runtimeStatus: "idle",
     metadata: {
       ...(params.metadata || {}),
@@ -281,7 +282,10 @@ async function resolveSessionStage(input: PromptLifecycleInput): Promise<PromptL
   });
 
   const existing = rt.registry.getStoredSession(sessionId);
-  let effectiveCwd = input.cwd;
+  // An existing session runs where it always has: Claude Code resumes a
+  // transcript only from the folder that holds it. The client's cwd is the
+  // workspace it is showing, which for a worktree session is the root.
+  let effectiveCwd = existing?.cwd ?? input.cwd;
   let workspaceResult =
     effectiveCwd !== undefined ? rt.registry.getOrCreateWorkspace(effectiveCwd) : undefined;
   if (!effectiveCwd && existing) {
@@ -358,6 +362,7 @@ async function prepareRuntimeStage(state: PromptLifecycleState): Promise<void> {
       model: state.resolvedModel,
       agent: state.agent,
       purpose: "chat",
+      cwd: state.effectiveCwd,
       runtimeStatus: "idle",
       metadata: {
         lastUserMessageAt: state.userMessageAtIso,

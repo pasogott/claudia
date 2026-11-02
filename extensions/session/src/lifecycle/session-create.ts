@@ -69,6 +69,7 @@ export function createDraftSession(params: DraftSessionParams): {
     model,
     agent,
     purpose: "chat",
+    cwd: params.cwd,
     runtimeStatus: "idle",
     metadata: {
       bootstrapSystemPrompt: systemPrompt,

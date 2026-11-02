@@ -14,6 +14,7 @@ import { join, basename } from "node:path";
 import { homedir } from "node:os";
 import { generateWorkspaceId, createLogger } from "@anima/shared";
 import { resolveProjectDir } from "./claude-projects";
+import { findGitLayout, worktreesConventionRoot } from "./git-layout";
 
 const log = createLogger("Workspace", join(homedir(), ".anima", "logs", "session.log"));
 
@@ -41,6 +42,41 @@ export interface Workspace {
   updatedAt: string;
   /** When it was deleted; null while live. Deleted workspaces are hidden, not gone. */
   deletedAt: string | null;
+}
+
+/** How a folder came to be part of a workspace. */
+export type WorkspaceFolderKind = "root" | "worktree" | "added";
+
+/**
+ * One folder of a workspace (#107). A workspace is its root plus any git
+ * worktrees of its repo and folders added by hand; each folder belongs to at
+ * most one workspace.
+ */
+export interface WorkspaceFolder {
+  path: string;
+  workspaceId: string;
+  kind: WorkspaceFolderKind;
+  /** Set when the folder moved or is gone. It stays a member so its sessions keep their workspace. */
+  inactiveAt: string | null;
+  createdAt: string;
+}
+
+interface WorkspaceFolderRow {
+  path: string;
+  workspace_id: string;
+  kind: WorkspaceFolderKind;
+  inactive_at: string | null;
+  created_at: string;
+}
+
+function toWorkspaceFolder(row: WorkspaceFolderRow): WorkspaceFolder {
+  return {
+    path: row.path,
+    workspaceId: row.workspace_id,
+    kind: row.kind,
+    inactiveAt: row.inactive_at ?? null,
+    createdAt: row.created_at,
+  };
 }
 
 /** Project fields settable with `updateWorkspaceProject`. */
@@ -170,6 +206,17 @@ function getDb(): Database {
     }
   }
 
+  // Folder membership (gateway migration 035); created here for standalone tests.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS workspace_folders (
+      path         TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+      kind         TEXT NOT NULL CHECK(kind IN ('root', 'worktree', 'added')),
+      inactive_at  TEXT,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
   log.info("Opened workspace database", { path: dbPath });
   return db;
 }
@@ -270,7 +317,26 @@ export function getWorkspace(id: string): Workspace | null {
   return row ? toWorkspace(row) : null;
 }
 
+/**
+ * The workspace one of whose folders is exactly `cwd` (its root, a worktree,
+ * an added folder), deleted or not. No upward or git lookup: that is
+ * `resolveWorkspaceForCwd`.
+ */
 export function getWorkspaceByCwd(cwd: string): Workspace | null {
+  const row = getDb()
+    .query(
+      `SELECT w.* FROM workspace_folders f JOIN workspaces w ON w.id = f.workspace_id
+        WHERE f.path = ?1
+       UNION ALL
+       SELECT * FROM workspaces WHERE cwd = ?1
+       LIMIT 1`,
+    )
+    .get(cwd) as WorkspaceRow | null;
+  return row ? toWorkspace(row) : null;
+}
+
+/** A workspace's root, by its root folder only. */
+function getWorkspaceByRoot(cwd: string): Workspace | null {
   const row = getDb()
     .query("SELECT * FROM workspaces WHERE cwd = ?")
     .get(cwd) as WorkspaceRow | null;
@@ -283,11 +349,109 @@ export function createWorkspace(params: {
   general?: boolean;
 }): Workspace {
   const id = generateWorkspaceId();
-  getDb()
-    .query("INSERT INTO workspaces (id, name, cwd, general) VALUES (?, ?, ?, ?)")
-    .run(id, params.name, params.cwd, params.general ? 1 : 0);
+  const conn = getDb();
+  conn.transaction(() => {
+    conn
+      .query("INSERT INTO workspaces (id, name, cwd, general) VALUES (?, ?, ?, ?)")
+      .run(id, params.name, params.cwd, params.general ? 1 : 0);
+    conn
+      .query(
+        "INSERT OR IGNORE INTO workspace_folders (path, workspace_id, kind) VALUES (?, ?, 'root')",
+      )
+      .run(params.cwd, id);
+  })();
 
   return getWorkspace(id)!;
+}
+
+// ── Folders ──────────────────────────────────────────────────
+
+export function getWorkspaceFolder(path: string): WorkspaceFolder | null {
+  const row = getDb()
+    .query("SELECT * FROM workspace_folders WHERE path = ?")
+    .get(path) as WorkspaceFolderRow | null;
+  return row ? toWorkspaceFolder(row) : null;
+}
+
+/** A workspace's folders, root first. */
+export function listWorkspaceFolders(workspaceId: string): WorkspaceFolder[] {
+  const rows = getDb()
+    .query(
+      `SELECT * FROM workspace_folders WHERE workspace_id = ?
+        ORDER BY kind = 'root' DESC, path`,
+    )
+    .all(workspaceId) as WorkspaceFolderRow[];
+  return rows.map(toWorkspaceFolder);
+}
+
+/**
+ * Make `path` a folder of the workspace. A folder already in this workspace
+ * is returned as it is; one that belongs to another workspace is refused,
+ * because a folder (and the sessions in it) can only be filed in one place.
+ */
+export function addWorkspaceFolder(
+  workspaceId: string,
+  path: string,
+  kind: Exclude<WorkspaceFolderKind, "root">,
+): WorkspaceFolder {
+  const existing = getWorkspaceFolder(path);
+  if (existing) {
+    if (existing.workspaceId === workspaceId) return existing;
+    throw new Error(`${path} already belongs to workspace ${existing.workspaceId}`);
+  }
+  getDb()
+    .query("INSERT INTO workspace_folders (path, workspace_id, kind) VALUES (?, ?, ?)")
+    .run(path, workspaceId, kind);
+  log.info("Added workspace folder", { workspaceId, path, kind });
+  return getWorkspaceFolder(path)!;
+}
+
+// ── Resolution ───────────────────────────────────────────────
+
+/** How `resolveWorkspaceForCwd` placed a folder. */
+export type WorkspaceMatch =
+  | "folder" // cwd is one of the workspace's folders
+  | "subfolder" // cwd is inside a member folder's git repository
+  | "worktree"; // cwd is in a git worktree of a member repository (now a member itself)
+
+/**
+ * The workspace a folder belongs to, or null when none does. The one place a
+ * cwd becomes a workspace (#107); every caller goes through it via
+ * `getOrCreateWorkspace`.
+ *
+ * 1. `cwd` is a member folder.
+ * 2. `cwd` is inside a git repository whose top folder is a member
+ *    (`packages/foo` of a member repo).
+ * 3. `cwd` is in a linked git worktree of a member repository, wherever the
+ *    worktree lives. The worktree's top folder joins as a `worktree` member.
+ * 4. `cwd` is under `<member>.worktrees/` but has no `.git` to read (a
+ *    removed worktree). The folder joins as a `worktree` member.
+ *
+ * Subfolders join only through git, never by path prefix: a workspace at `~`
+ * would otherwise swallow every project under it.
+ */
+export function resolveWorkspaceForCwd(
+  cwd: string,
+): { workspace: Workspace; match: WorkspaceMatch } | null {
+  const direct = getWorkspaceByCwd(cwd);
+  if (direct) return { workspace: direct, match: "folder" };
+
+  const git = findGitLayout(cwd);
+  if (git && git.toplevel !== cwd) {
+    const owner = getWorkspaceByCwd(git.toplevel);
+    if (owner) return { workspace: owner, match: "subfolder" };
+  }
+
+  const mainRepo = git?.mainRepo ?? (git ? null : worktreesConventionRoot(cwd));
+  if (mainRepo) {
+    const owner = getWorkspaceByCwd(mainRepo);
+    if (owner) {
+      addWorkspaceFolder(owner.id, git?.toplevel ?? cwd, "worktree");
+      return { workspace: owner, match: "worktree" };
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -311,7 +475,7 @@ export function getOrCreateWorkspace(
     expandedCwd = join(homedir(), cwd.slice(1));
   }
 
-  const existing = getWorkspaceByCwd(expandedCwd);
+  const existing = resolveWorkspaceForCwd(expandedCwd)?.workspace ?? null;
   if (existing?.deletedAt && options?.restore) {
     getDb()
       .query("UPDATE workspaces SET deleted_at = NULL, updated_at = datetime('now') WHERE id = ?")
@@ -351,6 +515,20 @@ export function getOrCreateWorkspace(
     throw error;
   }
 
+  // A worktree of a repo that has no workspace yet starts that repo's
+  // workspace, with the worktree as its first extra folder: worktrees are part
+  // of their project from the start, not a project of their own.
+  const git = findGitLayout(expandedCwd);
+  if (git?.mainRepo && existsSync(git.mainRepo)) {
+    const workspace = createWorkspace({
+      name: name || basename(git.mainRepo),
+      cwd: git.mainRepo,
+      general,
+    });
+    addWorkspaceFolder(workspace.id, git.toplevel, "worktree");
+    return { workspace, created: true };
+  }
+
   // Derive name from last path segment if not provided
   const derivedName = name || basename(expandedCwd);
   const workspace = createWorkspace({ name: derivedName, cwd: expandedCwd, general });
@@ -363,7 +541,7 @@ export function getOrCreateWorkspace(
  * False when there is no live workspace at that folder.
  */
 export function deleteWorkspace(cwd: string): boolean {
-  const existing = getWorkspaceByCwd(cwd);
+  const existing = getWorkspaceByRoot(cwd);
   if (!existing || existing.deletedAt) return false;
 
   getDb()

@@ -116,6 +116,7 @@ interface SessionRow {
   summary: string | null;
   metadata_json: string | null;
   previous_session_id: string | null;
+  cwd: string | null;
   last_activity: string;
   created_at: string;
   updated_at: string | null;
@@ -136,6 +137,13 @@ export interface StoredSession {
   summary: string | null;
   metadata: Record<string, unknown> | null;
   previousSessionId: string | null;
+  /**
+   * The folder the session really runs in. A workspace spans several folders
+   * (its root, worktrees, added folders), and Claude Code files transcripts
+   * and resumes per folder, so this is not always the workspace's root.
+   * Null only on a row written before migration 035 ran.
+   */
+  cwd: string | null;
   lastActivity: string;
   createdAt: string;
   updatedAt: string;
@@ -217,6 +225,7 @@ function toStoredSession(row: SessionRow): StoredSession {
     summary: row.summary,
     metadata: parseMetadata(row.metadata_json),
     previousSessionId: row.previous_session_id,
+    cwd: row.cwd ?? null,
     lastActivity: row.last_activity,
     createdAt: row.created_at,
     updatedAt: row.updated_at || row.last_activity,
@@ -267,6 +276,7 @@ function ensureSessionTable(currentDb: Database): void {
       summary             TEXT,
       metadata_json       TEXT,
       previous_session_id TEXT,
+      cwd                 TEXT,
       profile             TEXT,
       pinned              INTEGER NOT NULL DEFAULT 0,
       last_activity       TEXT NOT NULL DEFAULT (datetime('now')),
@@ -305,6 +315,8 @@ function ensureSessionTable(currentDb: Database): void {
   addColumn("profile", "profile TEXT");
   // Migration 030: pinned in the ACTIVE pane (see setSessionPinned).
   addColumn("pinned", "pinned INTEGER NOT NULL DEFAULT 0");
+  // Migration 035: the session's own folder (see StoredSession.cwd).
+  addColumn("cwd", "cwd TEXT");
   addColumn("updated_at", "updated_at TEXT NOT NULL DEFAULT (datetime('now'))");
 
   // A CHECK constraint can't be widened by ALTER TABLE, so a table left behind
@@ -425,6 +437,12 @@ export function upsertSession(params: {
   summary?: string | null;
   metadata?: Record<string, unknown> | null;
   previousSessionId?: string | null;
+  /**
+   * The folder the session runs in. Kept when omitted, so a caller that only
+   * knows the workspace (a status update) can't move a session out of its
+   * worktree.
+   */
+  cwd?: string;
   lastActivity?: string;
   /**
    * When the session really began, for a row being inserted. Only an insert
@@ -464,8 +482,8 @@ export function upsertSession(params: {
       `INSERT INTO sessions (
         workspace_id, provider_session_id, model, agent, purpose, parent_session_id,
         status, runtime_status, title, summary, metadata_json, previous_session_id,
-        last_activity, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, 'idle'), ?, ?, ?, ?, ?, ?, ?)
+        cwd, last_activity, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, 'idle'), ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(provider_session_id) DO UPDATE SET
         workspace_id = excluded.workspace_id,
         provider_session_id = excluded.provider_session_id,
@@ -486,6 +504,7 @@ export function upsertSession(params: {
           COALESCE(excluded.metadata_json, '{}')
         ),
         previous_session_id = COALESCE(excluded.previous_session_id, sessions.previous_session_id),
+        cwd = COALESCE(excluded.cwd, sessions.cwd),
         last_activity = excluded.last_activity,
         updated_at = excluded.updated_at`,
     )
@@ -502,6 +521,7 @@ export function upsertSession(params: {
       params.summary ?? null,
       metadataJson,
       params.previousSessionId ?? null,
+      params.cwd ?? null,
       params.lastActivity || now,
       params.createdAt || now,
       now,
@@ -832,7 +852,7 @@ export function listSessionsForRefSync(
   const rows = getDb()
     .query(
       `SELECT s.provider_session_id AS session_id, s.title AS title,
-              s.metadata_json AS metadata_json, w.cwd AS cwd
+              s.metadata_json AS metadata_json, COALESCE(s.cwd, w.cwd) AS cwd
          FROM sessions s
          JOIN workspaces w ON w.id = s.workspace_id
         WHERE s.purpose = 'chat' AND ${recencyClause}
@@ -902,7 +922,7 @@ export function getSessionsForSearch(sessionIds: readonly string[]): Map<string,
         `SELECT s.provider_session_id AS session_id, s.title, s.metadata_json,
                 s.status, s.disposition, s.last_activity,
                 w.id AS workspace_id, w.name AS workspace_name,
-                w.cwd AS cwd
+                COALESCE(s.cwd, w.cwd) AS cwd
            FROM sessions s
            JOIN workspaces w ON w.id = s.workspace_id
           WHERE s.provider_session_id IN (${placeholders})`,
@@ -1127,7 +1147,8 @@ export function listAttentionSessions(options?: {
       `SELECT s.provider_session_id AS session_id, s.title, s.metadata_json,
               s.runtime_status, s.disposition, s.last_activity, s.pinned,
               s.parent_session_id,
-              w.id AS workspace_id, w.name AS workspace_name, w.cwd AS cwd
+              w.id AS workspace_id, w.name AS workspace_name,
+              COALESCE(s.cwd, w.cwd) AS cwd
          FROM sessions s
          JOIN workspaces w ON w.id = s.workspace_id
         WHERE (s.purpose = 'chat'

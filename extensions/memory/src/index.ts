@@ -24,7 +24,7 @@ import type {
   HealthItem,
   LoggerLike,
 } from "@anima/shared";
-import { truncatePreservingSurrogates } from "@anima/shared";
+import { claudeProjectSlug, truncatePreservingSurrogates } from "@anima/shared";
 import { createStandardExtension } from "@anima/extension-host";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -790,8 +790,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
       case "memory.transition_conversation": {
         const startedAt = Date.now();
         const cwd = params.cwd as string;
-        const encodedCwd = cwd.replace(/\//g, "-").replace(/^-/, "");
-        const pattern = `%${encodedCwd}%`;
+        const pattern = `%${claudeProjectSlug(cwd)}/%`;
         const changed = transitionActiveConversationsByCwd(pattern);
 
         if (changed > 0) {
@@ -868,9 +867,7 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
         const recentMessages = getRecentTranscriptEntries(cwd, maxRecentMessages);
 
         // Archived summaries are either workspace-scoped or global, depending on workspace mode.
-        const pattern = includeAllSummaries
-          ? "%"
-          : `%${cwd.replace(/\//g, "-").replace(/^-/, "")}%`;
+        const pattern = includeAllSummaries ? "%" : `%${claudeProjectSlug(cwd)}/%`;
         const recentSummaries = getRecentArchivedSummaries(pattern, maxSummaries);
 
         ctx?.log.info("[memory] get_session_context completed", {

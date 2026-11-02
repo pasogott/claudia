@@ -56,19 +56,22 @@ export async function switchSession(params: {
   model?: string;
 }): Promise<{ sessionId: string }> {
   const rt = getRuntime();
-  const workspaceResult = rt.registry.getOrCreateWorkspace(params.cwd);
   const existing = rt.registry.getStoredSession(params.sessionId);
-  await transitionConversation(params.cwd);
+  // Resume in the session's own folder (see resolveSessionStage): the client
+  // sends the workspace it shows, which for a worktree session is the root.
+  const cwd = existing?.cwd ?? params.cwd;
+  const workspaceResult = rt.registry.getOrCreateWorkspace(cwd);
+  await transitionConversation(cwd);
 
   const resumeModel = params.model || existing?.model || rt.sessionConfig.model;
   await recycleForModelDrift(params.sessionId, resumeModel);
 
   log.info("Switching session", {
     sessionId: shortId(params.sessionId),
-    cwd: params.cwd,
+    cwd,
     model: resumeModel,
   });
-  await rt.bridge.prompt(params.sessionId, "", params.cwd, resumeModel);
+  await rt.bridge.prompt(params.sessionId, "", cwd, resumeModel);
   rt.registry.upsertSession({
     id: params.sessionId,
     workspaceId: workspaceResult.workspace.id,
@@ -76,6 +79,7 @@ export async function switchSession(params: {
     model: existing?.model || resumeModel,
     agent: existing?.agent || "claude",
     purpose: existing?.purpose || "chat",
+    cwd,
     runtimeStatus: "idle",
     metadata: existing?.metadata || null,
     previousSessionId: existing?.previousSessionId ?? null,
@@ -105,6 +109,7 @@ export async function resetSession(params: {
     model,
     agent: "claude",
     purpose: "chat",
+    cwd: params.cwd,
     runtimeStatus: "idle",
     previousSessionId,
   });

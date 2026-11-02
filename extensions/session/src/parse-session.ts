@@ -8,6 +8,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { claudeProjectDir } from "@anima/shared";
 
 // ── Types matching @anima/ui ──────────────────────────────
 
@@ -333,10 +334,9 @@ export function resolveSessionPath(sessionId: string, cwd?: string): string | nu
 
   const projectsDir = join(homedir(), ".claude", "projects");
 
-  // Fast path: derive project dir from cwd (Claude Code encodes / as -)
+  // Fast path: derive project dir from cwd
   if (cwd) {
-    const encodedCwd = cwd.replace(/\//g, "-");
-    const directPath = join(projectsDir, encodedCwd, `${sessionId}.jsonl`);
+    const directPath = join(claudeProjectDir(cwd), `${sessionId}.jsonl`);
     if (existsSync(directPath)) return directPath;
     // cwd didn't match — fall through to scan
   }

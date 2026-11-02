@@ -21,6 +21,7 @@
 import { readFileSync, statSync, readdirSync, existsSync } from "node:fs";
 import { join, relative } from "node:path";
 import { homedir } from "node:os";
+import { claudeProjectSlug } from "@anima/shared";
 import {
   getDb,
   getFileState,
@@ -131,13 +132,12 @@ export function shouldExcludeFile(filePath: string, basePath: string, exclude: s
 /**
  * Whether a workspace's transcripts are excluded from ingestion.
  *
- * Claude Code stores a workspace's sessions under `<basePath>/<encoded cwd>/`,
- * encoding the cwd by replacing `/` and `.` with `-`. Asking the file matcher
- * about a path inside that directory keeps workspace and file exclusion on one
- * set of rules.
+ * Claude Code stores a workspace's sessions under `<basePath>/<slug of cwd>/`.
+ * Asking the file matcher about a path inside that directory keeps workspace
+ * and file exclusion on one set of rules.
  */
 export function isWorkspaceExcluded(cwd: string, basePath: string, exclude: string[]): boolean {
-  const projectDir = join(basePath, cwd.replace(/[/.]/g, "-"));
+  const projectDir = join(basePath, claudeProjectSlug(cwd));
   return shouldExcludeFile(join(projectDir, "session.jsonl"), basePath, exclude);
 }
 

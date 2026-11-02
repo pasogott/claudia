@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { claudeProjectDir, claudeProjectsDir } from "@anima/shared";
 import { deriveSessionTitle, deriveTitleFromMessage } from "./session-title";
 import {
   closeSync,
@@ -37,22 +37,12 @@ export interface SessionIndexEntry {
   disposition?: string;
 }
 
-/**
- * Encode a cwd to Claude Code's `~/.claude/projects/<encoded>/` directory
- * naming. Claude Code replaces both `/` and `.` with `-`, so
- * `/Users/me/.hammerspoon` becomes `-Users-me--hammerspoon` (note the
- * double-dash where the dot was).
- */
-function encodeCwd(cwd: string): string {
-  return cwd.replace(/[/.]/g, "-");
-}
-
 export function resolveProjectDir(cwd: string): string | null {
-  const projectsDir = join(homedir(), ".claude", "projects");
+  const projectsDir = claudeProjectsDir();
   if (!existsSync(projectsDir)) return null;
 
   // Try the canonical encoding first (cheap path lookup, no directory scan).
-  const primary = join(projectsDir, encodeCwd(cwd));
+  const primary = claudeProjectDir(cwd);
   if (existsSync(primary)) return primary;
 
   // Legacy encoding (only `/` → `-`) — older session dirs created before
