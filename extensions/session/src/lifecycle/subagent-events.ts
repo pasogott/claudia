@@ -29,10 +29,14 @@ export async function sendSessionNotification(
 
   const wrapped = `<user_notification>\n${text}\n</user_notification>`;
   const stored = rt.registry.getStoredSession(sessionId);
+  // The session's folder, so agent-host can resume one whose process isn't
+  // running; without it a notification only ever reached a live session.
+  const cwd =
+    stored?.cwd ?? (stored ? rt.registry.getWorkspace(stored.workspaceId)?.cwd : undefined);
   await rt.bridge.prompt(
     sessionId,
     wrapped,
-    undefined,
+    cwd,
     stored?.model || rt.sessionConfig.model,
     stored?.agent || "claude",
   );

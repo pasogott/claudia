@@ -981,7 +981,8 @@ describe("session extension", () => {
     expect(promptSpy).toHaveBeenCalledWith(
       sessionId,
       expect.stringContaining("<user_notification>"),
-      undefined,
+      // The parent's folder, so a parent whose process isn't running resumes.
+      "/repo/project",
       expect.any(String),
       expect.any(String),
       expect.any(String),
