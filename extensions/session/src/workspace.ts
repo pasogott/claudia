@@ -39,6 +39,8 @@ export interface Workspace {
   sentryProjects: string[];
   createdAt: string;
   updatedAt: string;
+  /** When it was deleted; null while live. Deleted workspaces are hidden, not gone. */
+  deletedAt: string | null;
 }
 
 /** Project fields settable with `updateWorkspaceProject`. */
@@ -66,6 +68,7 @@ interface WorkspaceRow {
   sentry_projects: string;
   created_at: string;
   updated_at: string;
+  deleted_at: string | null;
 }
 
 /**
@@ -105,6 +108,7 @@ function toWorkspace(row: WorkspaceRow): Workspace {
     sentryProjects: parseList(row.sentry_projects),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    deletedAt: row.deleted_at ?? null,
   };
 }
 
@@ -157,6 +161,8 @@ function getDb(): Database {
     ["email_domains", "TEXT NOT NULL DEFAULT '[]'"],
     ["github_repo", "TEXT"],
     ["sentry_projects", "TEXT NOT NULL DEFAULT '[]'"],
+    // Soft delete (gateway migration 033).
+    ["deleted_at", "TEXT"],
   ];
   for (const [name, type] of projectColumns) {
     if (!columns.some((column) => column.name === name)) {
@@ -209,9 +215,19 @@ function getMostRecentSessionTimestamp(cwd: string): string | null {
 
 // ── CRUD ─────────────────────────────────────────────────────
 
-export function listWorkspaces(): Workspace[] {
+/**
+ * Live workspaces, or with `deleted: true` only the deleted ones, most
+ * recently deleted first (the data behind a "recently deleted" view).
+ */
+export function listWorkspaces(options?: { deleted?: boolean }): Workspace[] {
+  if (options?.deleted) {
+    const deleted = getDb()
+      .query("SELECT * FROM workspaces WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC")
+      .all() as WorkspaceRow[];
+    return deleted.map(toWorkspace);
+  }
   const rows = getDb()
-    .query("SELECT * FROM workspaces ORDER BY updated_at DESC")
+    .query("SELECT * FROM workspaces WHERE deleted_at IS NULL ORDER BY updated_at DESC")
     .all() as WorkspaceRow[];
 
   // Enrich with most recent session timestamp from filesystem
@@ -245,6 +261,10 @@ export function setWorkspacePinned(id: string, pinned: boolean): Workspace | nul
   return getWorkspace(id);
 }
 
+/**
+ * One workspace by id or folder, deleted or not: sessions still point at a
+ * deleted workspace, and their status events need its folder.
+ */
 export function getWorkspace(id: string): Workspace | null {
   const row = getDb().query("SELECT * FROM workspaces WHERE id = ?").get(id) as WorkspaceRow | null;
   return row ? toWorkspace(row) : null;
@@ -270,11 +290,21 @@ export function createWorkspace(params: {
   return getWorkspace(id)!;
 }
 
+/**
+ * The workspace for a folder, created if there is none.
+ *
+ * A deleted workspace for the folder is returned as it is, still deleted,
+ * unless `restore` is set. Only an explicit "use this folder as a workspace"
+ * (`session.get_or_create_workspace`) restores: this also runs on every
+ * prompt and session list, and a tab still open on a workspace would
+ * otherwise undo its deletion on the next refetch.
+ */
 export function getOrCreateWorkspace(
   cwd: string,
   name?: string,
   general?: boolean,
-): { workspace: Workspace; created: boolean } {
+  options?: { restore?: boolean },
+): { workspace: Workspace; created: boolean; restored?: boolean } {
   // Expand ~ to home directory
   let expandedCwd = cwd;
   if (cwd.startsWith("~")) {
@@ -282,6 +312,13 @@ export function getOrCreateWorkspace(
   }
 
   const existing = getWorkspaceByCwd(expandedCwd);
+  if (existing?.deletedAt && options?.restore) {
+    getDb()
+      .query("UPDATE workspaces SET deleted_at = NULL, updated_at = datetime('now') WHERE id = ?")
+      .run(existing.id);
+    log.info("Restored workspace", { cwd: expandedCwd, id: existing.id });
+    return { workspace: getWorkspace(existing.id)!, created: false, restored: true };
+  }
   if (existing) {
     return { workspace: existing, created: false };
   }
@@ -320,11 +357,18 @@ export function getOrCreateWorkspace(
   return { workspace, created: true };
 }
 
+/**
+ * Delete a workspace: hide it, keeping the row (and every session that points
+ * at it) so `getOrCreateWorkspace(cwd, …, { restore: true })` can bring it back.
+ * False when there is no live workspace at that folder.
+ */
 export function deleteWorkspace(cwd: string): boolean {
   const existing = getWorkspaceByCwd(cwd);
-  if (!existing) return false;
+  if (!existing || existing.deletedAt) return false;
 
-  getDb().query("DELETE FROM workspaces WHERE cwd = ?").run(cwd);
+  getDb()
+    .query("UPDATE workspaces SET deleted_at = datetime('now'), pinned = 0 WHERE id = ?")
+    .run(existing.id);
   log.info("Deleted workspace", { cwd, id: existing.id });
   return true;
 }
@@ -391,7 +435,9 @@ export interface WorkspaceQuery {
 
 /** The one workspace a project reference points at, or null if none (or several) match. */
 export function findWorkspace(query: WorkspaceQuery): Workspace | null {
-  const rows = getDb().query("SELECT * FROM workspaces").all() as WorkspaceRow[];
+  const rows = getDb()
+    .query("SELECT * FROM workspaces WHERE deleted_at IS NULL")
+    .all() as WorkspaceRow[];
   const all = rows.map(toWorkspace);
   let matches: Workspace[] = [];
 

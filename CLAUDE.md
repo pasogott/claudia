@@ -253,7 +253,7 @@ Thin RPC client to agent-host for session and task management:
 
 - **Agent-host RPC**: WebSocket client (`AgentHostClient`) that translates session/task operations into agent-host protocol messages
 - **Provider-aware routing**: Routes prompts and sub-agents by `agent` parameter (`claude`, `codex`)
-- **Workspace CRUD**: SQLite (WAL mode) for workspace registry
+- **Workspace CRUD**: SQLite (WAL mode) for workspace registry. Deletes are soft (`deleted_at`): a deleted workspace and its sessions leave the lists and the Active queue, `list_workspaces --deleted true` shows them, and `get_or_create_workspace` on the same folder restores it with its id and history. Internal lookups (every prompt, every session list) never restore, so an open tab can't undo a delete
 - **Session Discovery**: Filesystem — reads `~/.claude/projects/{encoded-cwd}/sessions-index.json`, resolves paths via `resolveSessionPath(cwd)`
 - **History**: Parses JSONL session files from Claude Code
 - **Request context tracking**: Manages `connectionId` and tags (e.g., `voice.speak`) with primary/transient context merging
@@ -388,7 +388,7 @@ A Linear-lite across projects. A **ticket** is one problem; **reports** are the 
 
 **Sub-agent methods**: `session.spawn_agent`, `session.list_subagents`, `session.get_subagent`, `session.interrupt_subagent` — provider-agnostic delegation (codex code review, tests, etc.)
 
-**Workspace methods**: `session.list_workspaces`, `session.get_workspace`, `session.get_or_create_workspace`
+**Workspace methods**: `session.list_workspaces`, `session.get_workspace`, `session.get_or_create_workspace`, `session.delete_workspace` (soft)
 
 **Discovery**: `gateway.list_methods` — returns all methods with schemas
 

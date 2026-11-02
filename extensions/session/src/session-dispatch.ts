@@ -205,9 +205,9 @@ export function createSessionReadHandlers(): Record<string, SessionMethodHandler
         status: params.status as SubagentStatus | undefined,
         agent: params.agent as string | undefined,
       }),
-    "session.list_workspaces": async () => {
+    "session.list_workspaces": async (params) => {
       const rt = getRuntime();
-      return { workspaces: rt.registry.listWorkspaces() };
+      return { workspaces: rt.registry.listWorkspaces({ deleted: params.deleted === true }) };
     },
     "session.get_workspace": async (params) => {
       const rt = getRuntime();
@@ -549,10 +549,14 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
         cwd,
         params.name as string | undefined,
         params.general as boolean | undefined,
+        // The explicit "use this folder" call, so it brings a deleted
+        // workspace back. Internal callers never do.
+        { restore: true },
       );
       log.info("Get/create workspace", {
         cwd,
         created: result.created,
+        restored: Boolean(result.restored),
         general: result.workspace.general,
       });
       return result;

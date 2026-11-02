@@ -1125,6 +1125,7 @@ export function listAttentionSessions(options?: {
          JOIN workspaces w ON w.id = s.workspace_id
         WHERE s.purpose = 'chat'
           AND s.status = 'active'
+          AND w.deleted_at IS NULL
           AND s.disposition IN ('open','needs_review','blocked','snoozed')
           ${excludeClause}
         ORDER BY s.pinned DESC, s.created_at DESC

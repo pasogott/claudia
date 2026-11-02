@@ -33,8 +33,13 @@ export class SessionRegistry {
     return detectGithubRepo(cwd);
   }
 
-  getOrCreateWorkspace(cwd: string, name?: string, general?: boolean) {
-    return getOrCreateWorkspace(cwd, name, general);
+  getOrCreateWorkspace(
+    cwd: string,
+    name?: string,
+    general?: boolean,
+    options?: { restore?: boolean },
+  ) {
+    return getOrCreateWorkspace(cwd, name, general, options);
   }
 
   getWorkspace(id: string) {
@@ -45,8 +50,8 @@ export class SessionRegistry {
     return getWorkspaceByCwd(cwd);
   }
 
-  listWorkspaces() {
-    return listWorkspaces();
+  listWorkspaces(options?: { deleted?: boolean }) {
+    return listWorkspaces(options);
   }
 
   deleteWorkspace(cwd: string): boolean {

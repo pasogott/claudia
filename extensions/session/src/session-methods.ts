@@ -453,8 +453,11 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
   },
   {
     name: "session.list_workspaces",
-    description: "List all workspaces",
-    inputSchema: z.object({}),
+    description:
+      "List live workspaces, or with deleted:true only the deleted ones (most recent first). get_or_create_workspace on a deleted one's folder restores it.",
+    inputSchema: z.object({
+      deleted: z.boolean().optional().default(false).describe("List deleted workspaces instead"),
+    }),
     execution: { lane: "read", concurrency: "parallel" },
   },
   {
@@ -490,7 +493,8 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
   },
   {
     name: "session.get_or_create_workspace",
-    description: "Get or create workspace for CWD",
+    description:
+      "Get or create workspace for CWD. A deleted workspace at that folder is restored, with its id, project fields and sessions.",
     inputSchema: z.object({
       cwd: z.string().describe("Working directory"),
       name: z.string().optional().describe("Workspace name"),
@@ -503,7 +507,8 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
   },
   {
     name: "session.delete_workspace",
-    description: "Delete a workspace by CWD",
+    description:
+      "Delete a workspace by CWD. Soft: it's hidden (with its sessions) until get_or_create_workspace restores it.",
     inputSchema: z.object({
       cwd: z.string().describe("Working directory of workspace to delete"),
     }),

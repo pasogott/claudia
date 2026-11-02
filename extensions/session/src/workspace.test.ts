@@ -5,6 +5,7 @@ import { homedir, tmpdir } from "node:os";
 import {
   closeDb,
   createWorkspace,
+  deleteWorkspace,
   findWorkspace,
   getOrCreateWorkspace,
   getWorkspace,
@@ -33,6 +34,41 @@ describe("workspace db", () => {
       process.env.ANIMA_DATA_DIR = prevDataDir;
     }
     rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it("soft-deletes: hidden from lists and lookups, still reachable by id", () => {
+    const cwd = join(dataDir, "repo", "gone");
+    const created = createWorkspace({ name: "gone", cwd });
+    updateWorkspaceProject(created.id, { aliases: ["vanished"] });
+
+    expect(deleteWorkspace(cwd)).toBe(true);
+    expect(deleteWorkspace(cwd)).toBe(false);
+
+    expect(listWorkspaces().map((w) => w.id)).not.toContain(created.id);
+    expect(listWorkspaces({ deleted: true }).map((w) => w.id)).toEqual([created.id]);
+    expect(findWorkspace({ name: "vanished" })).toBeNull();
+    // Sessions still point at it, so a direct lookup keeps working.
+    expect(getWorkspace(created.id)?.deletedAt).toBeTruthy();
+  });
+
+  it("an explicit get-or-create restores a deleted workspace; internal lookups don't", () => {
+    const cwd = join(dataDir, "repo", "back");
+    mkdirSync(cwd, { recursive: true });
+    const created = createWorkspace({ name: "back", cwd });
+    updateWorkspaceProject(created.id, { githubRepo: "me/back" });
+    deleteWorkspace(cwd);
+
+    const internal = getOrCreateWorkspace(cwd);
+    expect(internal.workspace.id).toBe(created.id);
+    expect(internal.workspace.deletedAt).toBeTruthy();
+    expect(listWorkspaces().map((w) => w.id)).not.toContain(created.id);
+
+    const restored = getOrCreateWorkspace(cwd, undefined, undefined, { restore: true });
+    expect(restored).toMatchObject({ created: false, restored: true });
+    expect(restored.workspace.id).toBe(created.id);
+    expect(restored.workspace.deletedAt).toBeNull();
+    expect(restored.workspace.githubRepo).toBe("me/back");
+    expect(listWorkspaces().map((w) => w.id)).toContain(created.id);
   });
 
   it("creates, fetches, and lists workspaces", () => {

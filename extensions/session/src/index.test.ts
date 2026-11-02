@@ -237,6 +237,7 @@ describe("session extension", () => {
         sentryProjects: [],
         createdAt: "2026-02-22T00:00:00.000Z",
         updatedAt: "2026-02-22T00:00:00.000Z",
+        deletedAt: null,
       },
     ]);
     getWorkspaceSpy = spyOn(workspace, "getWorkspace").mockReturnValue({
@@ -253,6 +254,7 @@ describe("session extension", () => {
       sentryProjects: [],
       createdAt: "2026-02-22T00:00:00.000Z",
       updatedAt: "2026-02-22T00:00:00.000Z",
+      deletedAt: null,
     });
     getOrCreateWorkspaceSpy = spyOn(workspace, "getOrCreateWorkspace").mockReturnValue({
       workspace: {
@@ -269,6 +271,7 @@ describe("session extension", () => {
         sentryProjects: [],
         createdAt: "2026-02-22T00:00:00.000Z",
         updatedAt: "2026-02-22T00:00:00.000Z",
+        deletedAt: null,
       },
       created: true,
     });
@@ -1191,6 +1194,7 @@ describe("session extension", () => {
       "/repo/new-project",
       "new-project",
       undefined,
+      { restore: true },
     );
     expect(created).toEqual(getOrCreateWorkspaceSpy.mock.results[0]?.value);
 
