@@ -22,7 +22,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { discoverSessions, resolveProjectDir } from "./claude-projects";
-import { listWorkspaceSessions, upsertSession, type StoredSessionRef } from "./session-store";
+import {
+  getStoredSession,
+  listWorkspaceSessions,
+  upsertSession,
+  type StoredSessionRef,
+} from "./session-store";
 import type { RefsConfig } from "./session-refs";
 import { parseGithubRemote, readRefsConfig } from "./session-refs";
 import { syncSessionRefs, type RefSyncInput } from "./session-ref-sync";
@@ -119,6 +124,16 @@ export function reconcileWorkspace(cwd: string, workspaceId: string): number {
     // hasn't moved, so there is nothing new to persist.
     const lastActivity = entry.modified || entry.created;
     if (existing && !entry.firstPrompt && existing.modified === lastActivity) continue;
+
+    // A transcript in this folder that isn't one of this workspace's chat rows
+    // may still be known: a subagent spawned into this folder (a git worktree,
+    // say) belongs to its parent's workspace. Discovery only fills in what
+    // nobody recorded, so a row that exists stays exactly what its creator
+    // made it. Upserting it here re-homed subagents as parentless chats.
+    if (!existing) {
+      const known = getStoredSession(entry.sessionId);
+      if (known && (known.workspaceId !== workspaceId || known.purpose !== "chat")) continue;
+    }
 
     upsertSession({
       id: entry.sessionId,

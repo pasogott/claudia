@@ -1,9 +1,15 @@
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, ExternalLink } from "lucide-react";
 import type { SubagentInfo } from "../hooks/useChatGateway";
+import { Link } from "../router";
 
 interface SubagentActivityStripProps {
   subagents: SubagentInfo[];
+  /**
+   * Where a subagent's own session lives, for clients with routes (the web).
+   * Without it the strip shows the preview only.
+   */
+  subagentHref?: (subagentId: string) => string;
 }
 
 function shortSubagentId(subagentId: string): string {
@@ -41,7 +47,7 @@ function statusClasses(status: SubagentInfo["status"]): string {
   return "bg-emerald-500";
 }
 
-export function SubagentActivityStrip({ subagents }: SubagentActivityStripProps) {
+export function SubagentActivityStrip({ subagents, subagentHref }: SubagentActivityStripProps) {
   const [expandedSubagentId, setExpandedSubagentId] = useState<string | null>(null);
   const visibleSubagents = useMemo(() => subagents.slice(0, 5), [subagents]);
   const hiddenCount = Math.max(0, subagents.length - visibleSubagents.length);
@@ -116,6 +122,15 @@ export function SubagentActivityStrip({ subagents }: SubagentActivityStripProps)
                     <p className="truncate text-zinc-500">
                       CWD: <span className="text-zinc-300">{subagent.cwd}</span>
                     </p>
+                  )}
+                  {subagentHref && (
+                    <Link
+                      to={subagentHref(subagent.subagentId)}
+                      className="mt-2 inline-flex items-center gap-1 text-blue-400 hover:underline"
+                    >
+                      Open session
+                      <ExternalLink className="size-3" />
+                    </Link>
                   )}
                 </div>
               )}

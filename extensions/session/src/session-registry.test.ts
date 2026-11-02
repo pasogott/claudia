@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import * as os from "node:os";
 import { closeSessionDb, getStoredSession, touchSession, upsertSession } from "./session-store";
 import { SessionRegistry } from "./session-registry";
+import { closeDb as closeWorkspaceDb, listWorkspaces } from "./workspace";
 import type { AgentHostSessionInfo } from "./session-types";
 
 /**
@@ -60,6 +61,7 @@ describe("session registry — connected sweep", () => {
 
   afterEach(() => {
     closeSessionDb();
+    closeWorkspaceDb();
     homedirSpy.mockRestore();
     if (originalHome === undefined) delete process.env.HOME;
     else process.env.HOME = originalHome;
@@ -70,6 +72,35 @@ describe("session registry — connected sweep", () => {
     seed("awaiting_approval");
     new SessionRegistry().recordConnectedSessions([connected()]);
     expect(getStoredSession("ses_live")?.runtimeStatus).toBe("awaiting_approval");
+  });
+
+  it("keeps a subagent running in another folder where its creator filed it", () => {
+    upsertSession({
+      id: "ses_worktree_sub",
+      workspaceId: "ws_worktree_parent",
+      providerSessionId: "ses_worktree_sub",
+      model: "claude-opus-5",
+      agent: "claude",
+      purpose: "subagent",
+      parentSessionId: "ses_worktree_parent",
+      runtimeStatus: "running",
+      lastActivity: new Date().toISOString(),
+    });
+    // Agent-host reports it by the folder it runs in: a git worktree.
+    const worktree = join(tmpHome, "repo-worktree");
+    mkdirSync(worktree, { recursive: true });
+
+    new SessionRegistry().recordConnectedSessions([
+      connected({ id: "ses_worktree_sub", cwd: worktree, isActive: false }),
+    ]);
+
+    const stored = getStoredSession("ses_worktree_sub");
+    expect(stored?.workspaceId).toBe("ws_worktree_parent");
+    expect(stored?.purpose).toBe("subagent");
+    expect(stored?.parentSessionId).toBe("ses_worktree_parent");
+    expect(stored?.runtimeStatus).toBe("running");
+    // And the worktree did not become a workspace of its own.
+    expect(listWorkspaces().map((w) => w.cwd)).not.toContain(worktree);
   });
 
   it("still marks a stale live process as stalled", () => {

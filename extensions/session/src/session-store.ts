@@ -246,6 +246,10 @@ function ensureSessionTable(currentDb: Database): void {
   if (!workspaceColumns.some((column) => column.name === "pinned")) {
     currentDb.exec("ALTER TABLE workspaces ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0");
   }
+  // Soft delete (gateway migration 033): the attention list filters on it.
+  if (!workspaceColumns.some((column) => column.name === "deleted_at")) {
+    currentDb.exec("ALTER TABLE workspaces ADD COLUMN deleted_at TEXT");
+  }
 
   currentDb.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
@@ -1039,6 +1043,8 @@ export interface AttentionSession {
   waitingSince: string;
   /** Set while snoozed; the session reappears once this passes. */
   snoozedUntil: string | null;
+  /** Set on a subagent: the session that spawned it, which the nav nests it under. */
+  parentSessionId: string | null;
   /** Pinned rows sort ahead of the rest of the queue. */
   pinned: boolean;
   /** PR / ticket chips — the queue row should read like the tree row. */
@@ -1120,10 +1126,17 @@ export function listAttentionSessions(options?: {
     .query(
       `SELECT s.provider_session_id AS session_id, s.title, s.metadata_json,
               s.runtime_status, s.disposition, s.last_activity, s.pinned,
+              s.parent_session_id,
               w.id AS workspace_id, w.name AS workspace_name, w.cwd AS cwd
          FROM sessions s
          JOIN workspaces w ON w.id = s.workspace_id
-        WHERE s.purpose = 'chat'
+        WHERE (s.purpose = 'chat'
+               -- Subagents only while they're working or stuck. A finished
+               -- one has handed its result to its parent, which is where
+               -- that result gets acted on; listing it would only add a
+               -- "done, unacknowledged" row for Michael to clear.
+               OR (s.purpose IN ('subagent','review','test')
+                   AND s.runtime_status IN ('running','awaiting_input','awaiting_approval','failed','stalled')))
           AND s.status = 'active'
           AND w.deleted_at IS NULL
           AND s.disposition IN ('open','needs_review','blocked','snoozed')
@@ -1139,6 +1152,7 @@ export function listAttentionSessions(options?: {
     disposition: string | null;
     last_activity: string;
     pinned: number;
+    parent_session_id: string | null;
     workspace_id: string;
     workspace_name: string;
     cwd: string;
@@ -1186,6 +1200,7 @@ export function listAttentionSessions(options?: {
       lastActivity: row.last_activity,
       waitingSince,
       snoozedUntil,
+      parentSessionId: row.parent_session_id,
       pinned: row.pinned === 1,
       refs: refsBySession.get(row.session_id) ?? [],
     });

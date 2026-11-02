@@ -345,7 +345,16 @@ function ChatInner({
 
         <StatusBar hookState={gateway.hookState} />
 
-        <SubagentActivityStrip subagents={gateway.subagents} />
+        <SubagentActivityStrip
+          subagents={gateway.subagents}
+          // Route-scoped (web) clients can open a subagent's own session; it
+          // lives in its parent's workspace.
+          subagentHref={
+            gatewayOptions?.workspaceId
+              ? (subagentId) => `/chat/${gatewayOptions.workspaceId}/${subagentId}`
+              : undefined
+          }
+        />
 
         <InputArea
           input={input}

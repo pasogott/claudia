@@ -103,7 +103,14 @@ export class SessionRegistry {
   recordConnectedSessions(sessions: AgentHostSessionInfo[]): void {
     for (const session of sessions) {
       if (!session.cwd) continue;
-      const workspaceResult = getOrCreateWorkspace(session.cwd);
+      const existing = getStoredSession(session.id);
+      // A known session keeps the workspace, purpose and parent it was
+      // created with. A subagent runs in whatever folder it was given (often
+      // a git worktree), and adopting it by folder made that folder a
+      // workspace of its own and filed the subagent there as a parentless chat.
+      const workspaceId = existing
+        ? existing.workspaceId
+        : getOrCreateWorkspace(session.cwd).workspace.id;
       // A live process is not a turn in flight. `isProcessRunning` is true for
       // every attached CLI pane, so mapping it to `running` marked six live
       // sessions permanently busy — and a dot that is always green trains you
@@ -122,21 +129,21 @@ export class SessionRegistry {
       // restart and reset the clock behind "this finished 20 minutes ago and
       // you haven't looked". A session's last activity is the last thing said
       // in it, so an existing row keeps the value it already had.
-      const existing = getStoredSession(session.id);
 
       upsertSession({
         id: session.id,
-        workspaceId: workspaceResult.workspace.id,
+        workspaceId,
         providerSessionId: session.id,
         model: session.model,
-        agent: "claude",
-        purpose: "chat",
+        agent: existing?.agent ?? "claude",
+        purpose: existing?.purpose ?? "chat",
+        parentSessionId: existing?.parentSessionId ?? null,
         runtimeStatus,
         lastActivity: existing?.lastActivity ?? session.lastActivity,
       });
 
       if (session.isActive) {
-        setWorkspaceActiveSession(workspaceResult.workspace.id, session.id);
+        setWorkspaceActiveSession(workspaceId, session.id);
       }
     }
   }

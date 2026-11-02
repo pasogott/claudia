@@ -55,6 +55,7 @@ export function NavPanel() {
     disposition: s.disposition,
     waitingSince: s.waitingSince,
     pinned: s.pinned,
+    parentSessionId: s.parentSessionId ?? null,
   }));
 
   const onWorkspaceMenuAction = (action: WorkspaceMenuAction, workspace: WorkspaceInfo) => {

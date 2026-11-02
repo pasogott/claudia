@@ -45,6 +45,7 @@ import {
   CircleCheck,
   Eye,
   OctagonAlert,
+  CornerDownRight,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type {
@@ -148,6 +149,35 @@ export interface ActiveSessionRow {
   waitingSince: string;
   /** Pinned rows sort ahead of the rest. The server orders them. */
   pinned: boolean;
+  /** Set on a subagent: the session that spawned it. Shown nested under it. */
+  parentSessionId?: string | null;
+}
+
+/**
+ * The queue in display order: each subagent directly under its parent, in the
+ * server's order among siblings. A subagent whose parent isn't in the queue
+ * (resolved, or snoozed) keeps its own place, so it can't be lost.
+ */
+export function nestSubagents(rows: ActiveSessionRow[]): ActiveSessionRow[] {
+  const ids = new Set(rows.map((row) => row.sessionId));
+  const children = new Map<string, ActiveSessionRow[]>();
+  for (const row of rows) {
+    if (row.parentSessionId && ids.has(row.parentSessionId)) {
+      const siblings = children.get(row.parentSessionId) ?? [];
+      siblings.push(row);
+      children.set(row.parentSessionId, siblings);
+    }
+  }
+  const ordered: ActiveSessionRow[] = [];
+  const place = (row: ActiveSessionRow) => {
+    ordered.push(row);
+    for (const child of children.get(row.sessionId) ?? []) place(child);
+  };
+  for (const row of rows) {
+    const nested = row.parentSessionId && ids.has(row.parentSessionId);
+    if (!nested) place(row);
+  }
+  return ordered;
 }
 
 // ── Time formatting ─────────────────────────────────────────────
@@ -314,14 +344,22 @@ function ActivePane({
     return <div className="px-2 py-6 text-center text-xs text-gray-400">Nothing active</div>;
   }
 
+  const ordered = nestSubagents(rows);
+  const listedIds = new Set(rows.map((row) => row.sessionId));
   // Where the pinned group ends. The server sorts pinned rows first, so a
-  // divider before the first unpinned row is all it takes to show the split.
-  const firstUnpinned = rows.findIndex((row) => !row.pinned);
+  // divider before the first unpinned top-level row is all it takes to show
+  // the split (a pinned parent's subagents stay above it, with their parent).
+  const firstUnpinned = ordered.findIndex(
+    (row) => !row.pinned && !(row.parentSessionId && listedIds.has(row.parentSessionId)),
+  );
 
   return (
     <div className="space-y-0.5">
-      {rows.map((row, index) => (
-        <div key={row.sessionId}>
+      {ordered.map((row, index) => (
+        <div
+          key={row.sessionId}
+          className={row.parentSessionId && listedIds.has(row.parentSessionId) ? "ml-4" : undefined}
+        >
           {index > 0 && index === firstUnpinned && (
             <div className="mx-2 my-1 border-t border-gray-100" />
           )}
@@ -416,7 +454,11 @@ function ActiveRow({
             {row.pinned && (
               <Pin className="size-3 flex-shrink-0 text-blue-500" aria-label="Pinned" />
             )}
+            {row.parentSessionId && (
+              <CornerDownRight className="size-3 flex-shrink-0" aria-label="Subagent" />
+            )}
             <span className="truncate">
+              {row.parentSessionId ? "subagent · " : ""}
               {row.workspaceName} · {elapsedLabel(row.waitingSince, now)}
             </span>
           </span>

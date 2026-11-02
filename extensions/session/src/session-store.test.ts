@@ -464,6 +464,32 @@ describe("session store", () => {
         expect(ids).toEqual(["ses_newest", "ses_middle", "ses_oldest"]);
       });
 
+      it("lists a subagent with its parent while it works, and drops it once done", () => {
+        seed("ses_coord");
+        upsertSession({
+          id: "ses_child",
+          workspaceId: "ws_status",
+          providerSessionId: "ses_child",
+          model: "claude-opus-5",
+          agent: "claude",
+          purpose: "subagent",
+          parentSessionId: "ses_coord",
+          runtimeStatus: "running",
+        });
+
+        const listed = () =>
+          listAttentionSessions({ now: NOW }).find((s) => s.sessionId === "ses_child");
+        expect(listed()?.parentSessionId).toBe("ses_coord");
+
+        // Finished: the result went to the parent, so nothing here needs Michael.
+        touchSession("ses_child", "completed");
+        expect(listed()).toBeUndefined();
+
+        // Stuck again: back in the list.
+        touchSession("ses_child", "failed");
+        expect(listed()?.parentSessionId).toBe("ses_coord");
+      });
+
       it("puts pinned sessions first, each group newest first", () => {
         seed("ses_a");
         seed("ses_b");

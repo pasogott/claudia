@@ -46,6 +46,8 @@ export interface AttentionSession {
   /** What "waiting 20 minutes" is measured from — the turn's end, not a restart. */
   waitingSince: string;
   snoozedUntil: string | null;
+  /** Set on a subagent: the session that spawned it. The nav nests it there. */
+  parentSessionId?: string | null;
   /** Pinned rows sort ahead of the rest; the server orders them. */
   pinned: boolean;
   refs?: SessionRefInfo[];
