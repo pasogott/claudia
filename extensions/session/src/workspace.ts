@@ -277,10 +277,23 @@ export function listWorkspaces(options?: { deleted?: boolean }): Workspace[] {
     .query("SELECT * FROM workspaces WHERE deleted_at IS NULL ORDER BY updated_at DESC")
     .all() as WorkspaceRow[];
 
-  // Enrich with most recent session timestamp from filesystem
+  // Enrich with the most recent transcript in any of the workspace's folders
+  // (a worktree's work counts as the project's).
   const workspaces = rows.map((row) => {
     const workspace = toWorkspace(row);
-    const recentTimestamp = getMostRecentSessionTimestamp(row.cwd);
+    const folders = new Set([
+      row.cwd,
+      ...listWorkspaceFolders(row.id)
+        .filter((f) => !f.inactiveAt)
+        .map((f) => f.path),
+    ]);
+    let recentTimestamp: string | null = null;
+    for (const folder of folders) {
+      const timestamp = getMostRecentSessionTimestamp(folder);
+      if (timestamp && (!recentTimestamp || timestamp > recentTimestamp)) {
+        recentTimestamp = timestamp;
+      }
+    }
     // Use the most recent session timestamp if available, otherwise fall back to DB updated_at
     if (recentTimestamp) {
       workspace.updatedAt = recentTimestamp;

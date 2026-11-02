@@ -174,6 +174,8 @@ export interface SessionListInfo {
   previousSessionId?: string;
   /** The session this one handed its work to (`session.handoff`). */
   handedOffTo?: string;
+  /** The folder the session runs in: the workspace root, a worktree, a subfolder (#107). */
+  cwd?: string;
 }
 
 export interface StoredSessionRef {
@@ -1028,6 +1030,7 @@ export function listWorkspaceSessions(
       previousSessionId: stored.previousSessionId ?? undefined,
       handedOffTo:
         typeof metadata.handedOffTo === "string" ? (metadata.handedOffTo as string) : undefined,
+      cwd: stored.cwd ?? undefined,
     };
   });
 }

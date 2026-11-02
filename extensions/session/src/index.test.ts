@@ -256,25 +256,29 @@ describe("session extension", () => {
       updatedAt: "2026-02-22T00:00:00.000Z",
       deletedAt: null,
     });
-    getOrCreateWorkspaceSpy = spyOn(workspace, "getOrCreateWorkspace").mockReturnValue({
-      workspace: {
-        id: "ws-2",
-        name: "new-project",
-        cwd: "/repo/new-project",
-        general: false,
-        pinned: false,
-        cwdDisplay: "/repo/new-project",
-        description: null,
-        aliases: [],
-        emailDomains: [],
-        githubRepo: null,
-        sentryProjects: [],
-        createdAt: "2026-02-22T00:00:00.000Z",
-        updatedAt: "2026-02-22T00:00:00.000Z",
-        deletedAt: null,
-      },
-      created: true,
-    });
+    // One workspace row for every folder, at the folder asked for: the
+    // reconciler sweeps the workspace's own folders, so its cwd must be real.
+    getOrCreateWorkspaceSpy = spyOn(workspace, "getOrCreateWorkspace").mockImplementation(
+      (cwd: string) => ({
+        workspace: {
+          id: "ws-2",
+          name: "new-project",
+          cwd,
+          general: false,
+          pinned: false,
+          cwdDisplay: cwd,
+          description: null,
+          aliases: [],
+          emailDomains: [],
+          githubRepo: null,
+          sentryProjects: [],
+          createdAt: "2026-02-22T00:00:00.000Z",
+          updatedAt: "2026-02-22T00:00:00.000Z",
+          deletedAt: null,
+        },
+        created: true,
+      }),
+    );
     closeDbSpy = spyOn(workspace, "closeDb").mockImplementation(() => {});
 
     promptSpy = spyOn(AgentHostClient.prototype, "prompt").mockImplementation(function (

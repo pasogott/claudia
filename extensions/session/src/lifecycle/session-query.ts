@@ -34,7 +34,7 @@ export function listSessions(
   const workspaceResult = rt.registry.getOrCreateWorkspace(cwd);
   const workspaceId = workspaceResult.workspace.id;
 
-  reconcileWorkspace(cwd, workspaceId);
+  reconcileWorkspace(workspaceResult.workspace);
   const all = listWorkspaceSessions(workspaceId);
 
   // Newest *created* first, not most recently active — the same rule the work

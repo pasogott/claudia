@@ -17,8 +17,8 @@
  * one.
  */
 
-import { createLogger } from "@anima/shared";
-import { readFileSync } from "node:fs";
+import { claudeProjectDir, createLogger } from "@anima/shared";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { discoverSessions, resolveProjectDir } from "./claude-projects";
@@ -26,8 +26,11 @@ import {
   getStoredSession,
   listWorkspaceSessions,
   upsertSession,
+  type SessionListInfo,
   type StoredSessionRef,
 } from "./session-store";
+import { getWorkspaceFolder, listWorkspaceFolders, resolveWorkspaceForCwd } from "./workspace";
+import { listConventionWorktrees } from "./git-layout";
 import type { RefsConfig } from "./session-refs";
 import { parseGithubRemote, readRefsConfig } from "./session-refs";
 import { syncSessionRefs, type RefSyncInput } from "./session-ref-sync";
@@ -94,7 +97,14 @@ export function resolveRefsConfig(cwd: string): RefsConfig {
 }
 
 /**
- * Reconcile one workspace: discover its transcripts and upsert them.
+ * Reconcile one workspace: discover the transcripts in each of its folders
+ * and upsert them (#107).
+ *
+ * Claude Code keeps transcripts per folder, so a workspace's sessions are
+ * spread over its root, its worktrees, folders added by hand, and any
+ * subfolder a session ran in. Each is swept on its own, and each is pruned
+ * only against the sessions that live in it: a worktree's sessions are not
+ * in the root's transcript directory, and must not be archived for it.
  *
  * Titles are only re-derived for sessions that are new or whose mtime moved,
  * so a steady-state sweep costs one `readdir` plus a `stat` per file. When a
@@ -102,11 +112,98 @@ export function resolveRefsConfig(cwd: string): RefsConfig {
  * returns `firstPrompt: undefined` in that case, and writing that through
  * would erase a good title (or a user's explicit rename).
  */
-export function reconcileWorkspace(cwd: string, workspaceId: string): number {
-  const rt = getRuntime();
-  const refsConfig = resolveRefsConfig(cwd);
+export function reconcileWorkspace(workspace: { id: string; cwd: string }): number {
+  adoptLiveWorktrees(workspace.cwd);
 
-  const stored = new Map(listWorkspaceSessions(workspaceId).map((s) => [s.sessionId, s]));
+  const refsConfig = resolveRefsConfig(workspace.cwd);
+  const stored = new Map(listWorkspaceSessions(workspace.id).map((s) => [s.sessionId, s]));
+
+  let written = 0;
+  const discovered: { sessionId: string }[] = [];
+  const folders = foldersToSweep(workspace, stored.values());
+  for (const folder of folders) {
+    const result = reconcileFolder(folder, workspace, stored, refsConfig);
+    written += result.written;
+    discovered.push(...result.discovered);
+  }
+
+  // Each folder prunes only its own sessions, but against every transcript
+  // found in the workspace: a session whose recorded folder is off (its
+  // transcript sits under another member) is still on disk, and archiving it
+  // here only for the other folder's sweep to revive it would flap forever.
+  // A session with no recorded folder predates #107 and lives in the root.
+  let archived = 0;
+  for (const folder of folders) {
+    const here = new Map(
+      [...stored].filter(([, session]) => (session.cwd ?? workspace.cwd) === folder),
+    );
+    if (here.size > 0) archived += pruneVanishedSessions(folder, here, discovered);
+  }
+
+  lastReconciledAt.set(workspace.id, Date.now());
+  if (archived > 0) log.info("Reconciled workspace", { cwd: workspace.cwd, archived });
+  return written;
+}
+
+/**
+ * Make the root's worktrees under `<root>.worktrees/` members of its
+ * workspace (through the resolver), so worktree sessions started outside
+ * Anima are found too. Only worktrees Claude Code has run in, with a
+ * transcript directory: the rest have nothing to file, and the resolver adds
+ * one as soon as a session starts there. A folder that already belongs to a
+ * workspace is left where it is.
+ */
+function adoptLiveWorktrees(root: string): void {
+  if (!existsSync(`${root}.worktrees`)) return;
+  for (const worktree of listConventionWorktrees(root)) {
+    if (!existsSync(claudeProjectDir(worktree))) continue;
+    try {
+      resolveWorkspaceForCwd(worktree);
+    } catch (error) {
+      log.warn("Could not adopt worktree", { root, worktree, error: String(error) });
+    }
+  }
+}
+
+/**
+ * The folders whose transcript directories belong to a workspace: its root,
+ * its active member folders, and the folder of each of its sessions (which
+ * catches subfolders, since they join through git without becoming members).
+ *
+ * Inactive folders are skipped: a moved folder's transcripts moved with it.
+ * So is a session folder that is another workspace's member, whose sweep
+ * owns it.
+ */
+export function foldersToSweep(
+  workspace: { id: string; cwd: string },
+  sessions: Iterable<{ cwd?: string }>,
+): string[] {
+  const members = listWorkspaceFolders(workspace.id);
+  const inactive = new Set(members.filter((f) => f.inactiveAt).map((f) => f.path));
+  const folders = new Set([
+    workspace.cwd,
+    ...members.filter((f) => !f.inactiveAt).map((f) => f.path),
+  ]);
+
+  for (const session of sessions) {
+    const cwd = session.cwd;
+    if (!cwd || folders.has(cwd) || inactive.has(cwd)) continue;
+    const owner = getWorkspaceFolder(cwd);
+    if (owner && owner.workspaceId !== workspace.id) continue;
+    folders.add(cwd);
+  }
+  return [...folders];
+}
+
+/** Discover one folder's transcripts and file them under the workspace. */
+function reconcileFolder(
+  cwd: string,
+  workspace: { id: string; cwd: string },
+  stored: Map<string, SessionListInfo>,
+  refsConfig: RefsConfig,
+): { written: number; discovered: { sessionId: string }[] } {
+  const rt = getRuntime();
+  const workspaceId = workspace.id;
 
   const discovered = discoverSessions(cwd, {
     needsTitle: (sessionId, modified) => {
@@ -130,10 +227,8 @@ export function reconcileWorkspace(cwd: string, workspaceId: string): number {
     // say) belongs to its parent's workspace. Discovery only fills in what
     // nobody recorded, so a row that exists stays exactly what its creator
     // made it. Upserting it here re-homed subagents as parentless chats.
-    if (!existing) {
-      const known = getStoredSession(entry.sessionId);
-      if (known && (known.workspaceId !== workspaceId || known.purpose !== "chat")) continue;
-    }
+    const known = existing ? undefined : getStoredSession(entry.sessionId);
+    if (known && (known.workspaceId !== workspaceId || known.purpose !== "chat")) continue;
 
     upsertSession({
       id: entry.sessionId,
@@ -142,8 +237,11 @@ export function reconcileWorkspace(cwd: string, workspaceId: string): number {
       model: rt.sessionConfig.model,
       agent: "claude",
       purpose: "chat",
-      // The folder whose transcript directory this came from.
-      cwd,
+      // The folder whose transcript directory this came from, for a session
+      // with none yet. A recorded folder stands: the same transcript
+      // directory can be reached from two folders (a moved folder left
+      // behind as a symlink), and the sweep order must not flip it.
+      cwd: (existing?.cwd ?? known?.cwd) ? undefined : cwd,
       // Deliberately no runtime status. The reconciler reads transcripts off
       // disk; it knows nothing about what the agent is doing right now, and
       // asserting `idle` here was resetting the live status of every session it
@@ -165,13 +263,10 @@ export function reconcileWorkspace(cwd: string, workspaceId: string): number {
 
   syncRefs(discovered, stored, refsConfig);
 
-  const archived = pruneVanishedSessions(cwd, stored, discovered);
-
-  lastReconciledAt.set(workspaceId, Date.now());
-  if (written > 0 || archived > 0) {
-    log.info("Reconciled workspace", { cwd, discovered: discovered.length, written, archived });
+  if (written > 0) {
+    log.info("Reconciled folder", { cwd, discovered: discovered.length, written });
   }
-  return written;
+  return { written, discovered };
 }
 
 /**
@@ -276,7 +371,7 @@ export function reconcileAllWorkspaces(): number {
   let written = 0;
   for (const workspace of rt.registry.listWorkspaces()) {
     try {
-      written += reconcileWorkspace(workspace.cwd, workspace.id);
+      written += reconcileWorkspace(workspace);
     } catch (error) {
       // One unreadable workspace must not stop the sweep.
       log.warn("Workspace reconcile failed", { cwd: workspace.cwd, error: String(error) });

@@ -8,7 +8,7 @@
  * worktree is recognized wherever it lives, not only under `<repo>.worktrees/`.
  */
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync, type Dirent } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 export interface GitLayout {
@@ -53,6 +53,36 @@ function worktreeMainRepo(toplevel: string, dotGitFile: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * The linked worktrees of `repo` that live under `<repo>.worktrees/`, one
+ * level of grouping folders deep (`<repo>.worktrees/feat/<branch>`, or a
+ * folder per person). Only real worktrees of this repository count: a
+ * grouping folder, a stray clone or another repo's worktree does not.
+ */
+export function listConventionWorktrees(repo: string): string[] {
+  const found: string[] = [];
+  const visit = (dir: string, depth: number): void => {
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const path = join(dir, entry.name);
+      if (existsSync(join(path, ".git"))) {
+        const layout = findGitLayout(path);
+        if (layout?.toplevel === path && layout.mainRepo === repo) found.push(path);
+      } else if (depth < 2) {
+        visit(path, depth + 1);
+      }
+    }
+  };
+  visit(`${repo}.worktrees`, 1);
+  return found;
 }
 
 /**
