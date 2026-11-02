@@ -61,6 +61,10 @@ export interface SessionInfo {
   runtimeStatus?: SessionRuntimeStatus;
   /** Where the work stands — human state, set from the row's menu. */
   disposition?: SessionDisposition;
+  /** The session this one continues (a handoff or a reset). */
+  previousSessionId?: string;
+  /** The session this one handed its work to (`session.handoff`). */
+  handedOffTo?: string;
 }
 
 /** Mirrors `RuntimeStatus` in the session extension's store. */
@@ -249,6 +253,20 @@ export interface UseChatGatewayOptions {
    * Used by the web UI to persist things like voice.speak across prompt continuations.
    */
   getDefaultTags?: () => string[] | undefined;
+
+  /**
+   * The session being shown handed its work to a new one (`session.handoff`).
+   * The web client navigates to the target's route. Without this, the hook
+   * moves to the target in place (VS Code and other embedded clients).
+   */
+  onHandoff?: (target: SessionHandoffTarget) => void;
+}
+
+/** Where `session.<id>.handoff` says the work went. */
+export interface SessionHandoffTarget {
+  sessionId: string;
+  workspaceId: string;
+  title: string;
 }
 
 // ─── Return Type ─────────────────────────────────────────────
@@ -525,6 +543,33 @@ export function useChatGateway(
       console.log(`[WS] Subscribed to session: session.${sid.slice(0, 8)}...*`);
     },
     [client],
+  );
+
+  /**
+   * Show a different session in this view: follow its stream, drop the old
+   * one's state, and load its history. The old session may still be mid-turn
+   * (a handoff is its last tool call), so its spinner goes too; the new
+   * session's own stream turns it back on.
+   */
+  const adoptSession = useCallback(
+    (sid: string) => {
+      setSessionId(sid);
+      subscribeToSession(sid);
+      setMessages(() => []);
+      setSubagents(() => []);
+      setUsage(null);
+      setGitStatus(null);
+      setTotalMessages(0);
+      setHasMore(false);
+      setIsQuerying(false);
+      historyLoadedRef.current = false;
+      sendRequest("session.get_history", { sessionId: sid, limit: 50 });
+      sendRequest("session.list_subagents", { parentSessionId: sid });
+      if (workspaceRef.current?.cwd) {
+        sendRequest("session.list_sessions", { cwd: workspaceRef.current.cwd });
+      }
+    },
+    [sendRequest, setMessages, subscribeToSession],
   );
 
   // ── Message mutation helpers ────────────────────────────────
@@ -1162,21 +1207,8 @@ export function useChatGateway(
       if (method === "session.switch_session") {
         const switchedSessionId = payload.sessionId as string | undefined;
         if (switchedSessionId) {
-          setSessionId(switchedSessionId);
-          subscribeToSession(switchedSessionId);
-          setMessages(() => []);
-          setSubagents(() => []);
-          setUsage(null);
-          setGitStatus(null);
-          setTotalMessages(0);
-          setHasMore(false);
-          historyLoadedRef.current = false;
           console.log(`[Session] Switched to: ${switchedSessionId}`);
-          sendRequest("session.get_history", { sessionId: switchedSessionId, limit: 50 });
-          sendRequest("session.list_subagents", { parentSessionId: switchedSessionId });
-          if (workspaceRef.current?.cwd) {
-            sendRequest("session.list_sessions", { cwd: workspaceRef.current.cwd });
-          }
+          adoptSession(switchedSessionId);
         }
       }
 
@@ -1227,6 +1259,7 @@ export function useChatGateway(
       }
     },
     [
+      adoptSession,
       normalizeSubagent,
       normalizeUsage,
       sendRequest,
@@ -1260,6 +1293,28 @@ export function useChatGateway(
         }
         const eventType = parts.slice(2).join(".");
         const eventPayload = (payload ?? {}) as Record<string, unknown>;
+
+        // The session on screen handed off: follow it. Only this view's own
+        // session counts; the server scopes the event to the caller's stream,
+        // so a view showing anything else never sees it.
+        if (eventType === "handoff") {
+          const targetSessionId = eventPayload.targetSessionId;
+          if (eventSessionId === sessionIdRef.current && typeof targetSessionId === "string") {
+            console.log(`[Session] Handed off to: ${targetSessionId}`);
+            const onHandoff = optionsRef.current.onHandoff;
+            if (onHandoff) {
+              onHandoff({
+                sessionId: targetSessionId,
+                workspaceId:
+                  typeof eventPayload.workspaceId === "string" ? eventPayload.workspaceId : "",
+                title: typeof eventPayload.title === "string" ? eventPayload.title : "",
+              });
+            } else {
+              adoptSession(targetSessionId);
+            }
+          }
+          return;
+        }
 
         if (eventSessionId !== sessionIdRef.current) {
           setSubagents((prev) => {
@@ -1309,7 +1364,7 @@ export function useChatGateway(
         }
       }
     },
-    [client, handleStreamEvent, sortSubagents],
+    [adoptSession, client, handleStreamEvent, sortSubagents],
   );
 
   useEffect(() => {

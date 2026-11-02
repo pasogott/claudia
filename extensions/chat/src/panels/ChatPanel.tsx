@@ -15,14 +15,17 @@ import {
   ClaudiaChat,
   getRememberedPanelWidth,
   Link,
+  navigate,
   rememberPanelWidth,
   useHeaderSlot,
   useIsMobile,
   useLayoutApi,
   useVoiceEnabled,
+  type SessionHandoffTarget,
 } from "@anima/ui";
 import { PanelLeft, PanelLeftDashed, Volume2, VolumeX, X } from "lucide-react";
 import { useChatPage } from "../context/ChatPageContext";
+import { HandoffLinks } from "./HandoffLinks";
 import { NavPanel } from "./NavPanel";
 
 const NAV_PANEL_ID = "chat.nav";
@@ -30,8 +33,25 @@ const NAV_PANEL_DEFAULT_WIDTH = 280;
 const EDITOR_PANEL_ID = "editor.viewer";
 const EDITOR_PANEL_DEFAULT_WIDTH = 800;
 
+/**
+ * The session on screen handed its work to a new one: go there. The new
+ * route remounts the chat, which loads the new session's history and stream.
+ * `replace` would be wrong — Back should still reach the old transcript.
+ */
+function followHandoff(target: SessionHandoffTarget): void {
+  if (!target.workspaceId) return;
+  navigate(`/chat/${target.workspaceId}/${target.sessionId}`);
+}
+
 export function ChatPanel() {
-  const { activeWorkspace, activeSessionId, chatBridge, isConnected, onNewSession } = useChatPage();
+  const {
+    activeWorkspace,
+    activeSessionId,
+    chatBridge,
+    isConnected,
+    onNewSession,
+    sessionsByWorkspace,
+  } = useChatPage();
   const isMobile = useIsMobile();
   const [navOpen, setNavOpen] = useState(false);
   // Voice on/off — shared with `ChatInner` via a pub/sub store so the toggle
@@ -233,17 +253,28 @@ export function ChatPanel() {
     );
   } else {
     body = (
-      <div className="h-full w-full bg-white">
-        <ClaudiaChat
-          bridge={chatBridge}
-          gatewayOptions={{ sessionId: activeSessionId, workspaceId: activeWorkspace.id }}
-          // The global AppHeader already shows workspace name, connection
-          // status, and (eventually) the voice toggle — let it own that
-          // chrome and skip ClaudiaChat's per-instance Header on the web.
-          showHeader={false}
-          // Re-mount when workspace/session changes — keeps streaming state clean.
-          key={`${activeWorkspace.id}-${activeSessionId}`}
+      <div className="flex h-full w-full flex-col bg-white">
+        <HandoffLinks
+          workspaceId={activeWorkspace.id}
+          sessionId={activeSessionId}
+          sessions={sessionsByWorkspace[activeWorkspace.id] ?? []}
         />
+        <div className="min-h-0 flex-1">
+          <ClaudiaChat
+            bridge={chatBridge}
+            gatewayOptions={{
+              sessionId: activeSessionId,
+              workspaceId: activeWorkspace.id,
+              onHandoff: followHandoff,
+            }}
+            // The global AppHeader already shows workspace name, connection
+            // status, and (eventually) the voice toggle — let it own that
+            // chrome and skip ClaudiaChat's per-instance Header on the web.
+            showHeader={false}
+            // Re-mount when workspace/session changes — keeps streaming state clean.
+            key={`${activeWorkspace.id}-${activeSessionId}`}
+          />
+        </div>
       </div>
     );
   }

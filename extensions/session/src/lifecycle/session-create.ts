@@ -29,6 +29,8 @@ export interface DraftSessionParams {
   effort?: Effort;
   /** Permission profile, fixed for the session's life. */
   profile: string;
+  /** The session this one continues (set by `session.handoff`). */
+  previousSessionId?: string;
 }
 
 /**
@@ -73,6 +75,7 @@ export function createDraftSession(params: DraftSessionParams): {
       bootstrapThinking: thinking,
       bootstrapEffort: effort,
     },
+    previousSessionId: params.previousSessionId ?? null,
   });
   setSessionProfile(sessionId, params.profile);
   rt.registry.setWorkspaceActiveSession(workspaceId, sessionId);

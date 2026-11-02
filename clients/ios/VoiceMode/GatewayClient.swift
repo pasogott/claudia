@@ -323,7 +323,15 @@ class GatewayClient: NSObject, @unchecked Sendable {
             }
 
         default:
-            break
+            // The voice session handed its work to a new one (session.handoff):
+            // send the next prompt there.
+            if let current = activeSessionId,
+               event == "session.\(current).handoff",
+               let target = payload["targetSessionId"] as? String {
+                print("[Gateway] Session handed off: \(current) -> \(target)")
+                activeSessionId = target
+                sendRequest(method: "gateway.subscribe", params: ["events": ["session.\(target).*"]]) { _ in }
+            }
         }
     }
 

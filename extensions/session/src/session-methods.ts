@@ -30,6 +30,38 @@ const SpawnAgentSchema = z.object({
     ),
 });
 
+export const handoffSchema = z
+  .object({
+    sessionId: z
+      .string()
+      .min(1)
+      .describe("Session handing off (auto-injected from $ANIMA_SESSION_ID)"),
+    title: z.string().trim().min(1).max(200).describe("Title for the new session"),
+    prompt: z.string().min(1).optional().describe("The new session's first message"),
+    promptFile: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Read the first message from this file (relative to the caller's folder)"),
+    // Deliberately not `cwd`: the CLI fills any `cwd` param from the shell's
+    // working directory, which drifts, and a drifted folder would start the new
+    // session in the wrong workspace.
+    targetCwd: z
+      .string()
+      .optional()
+      .describe("Folder for the new session; defaults to the caller's workspace"),
+    model: z.string().optional().describe("Model; defaults to the caller's"),
+    profile: z
+      .string()
+      .regex(/^[a-z][a-z0-9-]{0,31}$/)
+      .optional()
+      .describe("Permission profile; defaults to the caller's"),
+  })
+  .refine(
+    (p) => Boolean(p.prompt) !== Boolean(p.promptFile),
+    "Pass exactly one of prompt, promptFile",
+  );
+
 const nullableText = z.string().max(500).nullable().optional();
 
 export const workspaceUpdateSchema = z
@@ -264,6 +296,13 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
       'Spawn a child agent session and send its initial prompt, or start a top-level session with parentSessionId "NEW"',
     inputSchema: SpawnAgentSchema,
     execution: { lane: "long_running", concurrency: "keyed", keyParam: "parentSessionId" },
+  },
+  {
+    name: "session.handoff",
+    description:
+      "Hand this session's work to a new one, instead of compacting: creates a session with the caller's settings, titles it, sends it the prompt, links the two, resolves the caller, and moves every client showing the caller to the new session. Returns the new sessionId without streaming. A session hands off once.",
+    inputSchema: handoffSchema,
+    execution: { lane: "long_running", concurrency: "keyed", keyParam: "sessionId" },
   },
   {
     name: "session.get_subagent",

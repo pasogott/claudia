@@ -110,6 +110,31 @@ describe("session store", () => {
     expect(after?.firstPrompt).toBe("morning babe, let's look at the nav");
   });
 
+  it("lists both ends of a handoff", () => {
+    const base = {
+      workspaceId: "ws_handoff",
+      model: "claude-opus-5",
+      agent: "claude",
+      purpose: "chat" as const,
+      runtimeStatus: "idle" as const,
+      lastActivity: new Date().toISOString(),
+    };
+    upsertSession({ ...base, id: "ses_old", providerSessionId: "ses_old" });
+    upsertSession({
+      ...base,
+      id: "ses_new",
+      providerSessionId: "ses_new",
+      previousSessionId: "ses_old",
+    });
+    updateSessionMetadata("ses_old", { handedOffTo: "ses_new" });
+
+    const rows = new Map(listWorkspaceSessions("ws_handoff").map((row) => [row.sessionId, row]));
+    expect(rows.get("ses_old")?.handedOffTo).toBe("ses_new");
+    expect(rows.get("ses_old")?.previousSessionId).toBeUndefined();
+    expect(rows.get("ses_new")?.previousSessionId).toBe("ses_old");
+    expect(rows.get("ses_new")?.handedOffTo).toBeUndefined();
+  });
+
   it("clears a rename back to the derived title", () => {
     upsertSession({
       id: "ses_clear",

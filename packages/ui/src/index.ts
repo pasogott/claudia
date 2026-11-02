@@ -68,6 +68,7 @@ export type {
   SessionActivityEvent,
   SessionStatusChangedEvent,
   SessionListChangedEvent,
+  SessionHandoffTarget,
   SubagentInfo,
   GitStatusInfo,
 } from "./hooks/useChatGateway";

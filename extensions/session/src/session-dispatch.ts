@@ -1,7 +1,7 @@
 import { createLogger, shortId, formatElapsed } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import type { ExtensionContext } from "@anima/shared";
 import { rotatePersistentSessions } from "./persistent-sessions";
 import { listCommands } from "./commands-discovery";
@@ -26,6 +26,7 @@ import {
   type DraftSessionParams,
   type TopLevelSessionParams,
 } from "./lifecycle/session-create";
+import { HANDOFF_EVENT_TYPE, handOffSession } from "./lifecycle/session-handoff";
 import type { AgentHostSessionInfo } from "./session-types";
 import type { HealthCheckResponse } from "@anima/shared";
 import { getRuntime } from "./runtime";
@@ -33,17 +34,19 @@ import { backfillSessionRefs } from "./session-ref-sync";
 import { validateSessionRefs } from "./session-ref-validity";
 import { resolveRefsConfig } from "./session-reconciler";
 import {
+  getSessionProfile,
   getStoredSession,
   listAttentionSessions,
   setSessionPinned,
   resolveStaleCompleted,
   setSessionSnooze,
   setSessionTitle,
+  updateSessionMetadata,
   type SessionDisposition,
 } from "./session-store";
 import { applyDisposition, emitListChanged, emitStatusChanged } from "./session-status-events";
 import { searchSessions } from "./session-search";
-import { workspaceFindSchema, workspaceUpdateSchema } from "./session-methods";
+import { handoffSchema, workspaceFindSchema, workspaceUpdateSchema } from "./session-methods";
 
 function expandHome(path: string): string {
   return path === "~" || path.startsWith("~/") ? join(homedir(), path.slice(1)) : path;
@@ -481,6 +484,40 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
       const title = name?.trim() || null;
       if (title) setSessionTitle(spawned.sessionId as string, title);
       return { ...spawned, title };
+    },
+    "session.handoff": async (params) => {
+      const rt = getRuntime();
+      const request = { connectionId: rt.ctx.connectionId, tags: rt.ctx.tags };
+      const result = await handOffSession(handoffSchema.parse(params), {
+        getSession: getStoredSession,
+        getWorkspaceCwd: (workspaceId) => rt.registry.getWorkspace(workspaceId)?.cwd ?? null,
+        getProfile: getSessionProfile,
+        readFile: (path) => readFileSync(path, "utf8"),
+        createDraft: createDraftSession,
+        setTitle: (sessionId, title) => {
+          setSessionTitle(sessionId, title);
+        },
+        sendPrompt: (prompt) => runPromptLifecycle({ ...prompt, streaming: true }, request),
+        markHandedOff: (sessionId, targetSessionId) => {
+          updateSessionMetadata(sessionId, {
+            handedOffTo: targetSessionId,
+            handedOffAt: new Date().toISOString(),
+          });
+          applyDisposition(sessionId, "resolved");
+        },
+        // Broadcast on the caller's own stream: the only clients subscribed to
+        // it are the ones showing it, so a handoff from a background session
+        // moves nobody who is reading something else.
+        announce: (payload) => {
+          rt.ctx.emit(`session.${payload.sessionId}.${HANDOFF_EVENT_TYPE}`, payload);
+        },
+      });
+      log.info("Session handed off", {
+        from: shortId(result.previousSessionId),
+        to: shortId(result.sessionId),
+        title: result.title,
+      });
+      return result;
     },
     "session.interrupt_subagent": async (params) => {
       const rt = getRuntime();

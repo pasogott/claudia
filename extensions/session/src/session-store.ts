@@ -162,6 +162,10 @@ export interface SessionListInfo {
   runtimeStatus?: RuntimeStatus;
   /** Where the work stands — drives the chip and the default filter. */
   disposition?: SessionDisposition;
+  /** The session this one continues (a handoff or a reset). */
+  previousSessionId?: string;
+  /** The session this one handed its work to (`session.handoff`). */
+  handedOffTo?: string;
 }
 
 export interface StoredSessionRef {
@@ -997,6 +1001,9 @@ export function listWorkspaceSessions(
         typeof metadata.firstPrompt === "string" ? (metadata.firstPrompt as string) : undefined,
       gitBranch:
         typeof metadata.gitBranch === "string" ? (metadata.gitBranch as string) : undefined,
+      previousSessionId: stored.previousSessionId ?? undefined,
+      handedOffTo:
+        typeof metadata.handedOffTo === "string" ? (metadata.handedOffTo as string) : undefined,
     };
   });
 }

@@ -764,7 +764,11 @@ async function invokeMethod(
 
   try {
     if (streamPrompt) {
-      unsub = client.on("session.*", (event, payload) => {
+      // Only the target session's stream. Subscribing to `session.*` printed
+      // whatever any other session happened to be saying at the time, and
+      // stopped at the first `message_stop` from any of them.
+      const streamPattern = `session.${String(params.sessionId)}.*`;
+      unsub = client.on(streamPattern, (event, payload) => {
         const streamPayload = (payload || {}) as Record<string, unknown>;
 
         if (event.includes(".content_block_delta")) {
@@ -780,7 +784,7 @@ async function invokeMethod(
         }
       });
 
-      await client.subscribe(["session.*"]);
+      await client.subscribe([streamPattern]);
     }
 
     const payload = await client.call(method, params);
@@ -881,6 +885,9 @@ async function promptCompat(args: string[]): Promise<void> {
   process.on("SIGINT", onSigint);
 
   const unsub = client.on("session.*", (event, payload) => {
+    // The subscription has to start before the session is known, so it sees
+    // every session's stream; only ours is the reply.
+    if (!sessionRecordId || !event.startsWith(`session.${sessionRecordId}.`)) return;
     const streamPayload = payload as Record<string, unknown>;
     if (event.includes(".content_block_delta")) {
       const delta = streamPayload.delta as { type: string; text?: string } | undefined;
