@@ -46,6 +46,8 @@ import {
   Eye,
   OctagonAlert,
   CornerDownRight,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type {
@@ -178,6 +180,25 @@ export function nestSubagents(rows: ActiveSessionRow[]): ActiveSessionRow[] {
     if (!nested) place(row);
   }
   return ordered;
+}
+
+/**
+ * The queue as top-level rows, each carrying every subagent beneath it
+ * (subagents of subagents included, in `nestSubagents` order), so the pane
+ * can fold them behind one row per parent.
+ */
+export function groupSubagents(
+  rows: ActiveSessionRow[],
+): Array<{ row: ActiveSessionRow; subagents: ActiveSessionRow[] }> {
+  const ids = new Set(rows.map((row) => row.sessionId));
+  const groups: Array<{ row: ActiveSessionRow; subagents: ActiveSessionRow[] }> = [];
+  for (const row of nestSubagents(rows)) {
+    const nested = row.parentSessionId && ids.has(row.parentSessionId);
+    const current = groups[groups.length - 1];
+    if (nested && current) current.subagents.push(row);
+    else groups.push({ row, subagents: [] });
+  }
+  return groups;
 }
 
 // ── Time formatting ─────────────────────────────────────────────
@@ -340,41 +361,79 @@ function ActivePane({
   onSetDisposition?: (sessionId: string, disposition: SessionDisposition) => void;
   onPin?: (sessionId: string, pinned: boolean) => void;
 }) {
+  // Parents whose subagents are folded open. Collapsed by default: a session
+  // that delegates a lot would otherwise push everything else off the pane.
+  const [openParents, setOpenParents] = useState<Set<string>>(() => new Set());
+
   if (rows.length === 0) {
     return <div className="px-2 py-6 text-center text-xs text-gray-400">Nothing active</div>;
   }
 
-  const ordered = nestSubagents(rows);
-  const listedIds = new Set(rows.map((row) => row.sessionId));
+  const groups = groupSubagents(rows);
   // Where the pinned group ends. The server sorts pinned rows first, so a
   // divider before the first unpinned top-level row is all it takes to show
   // the split (a pinned parent's subagents stay above it, with their parent).
-  const firstUnpinned = ordered.findIndex(
-    (row) => !row.pinned && !(row.parentSessionId && listedIds.has(row.parentSessionId)),
+  const firstUnpinned = groups.findIndex((group) => !group.row.pinned);
+  const toggle = (sessionId: string) =>
+    setOpenParents((prev) => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) next.delete(sessionId);
+      else next.add(sessionId);
+      return next;
+    });
+
+  const renderRow = (row: ActiveSessionRow) => (
+    <ActiveRow
+      row={row}
+      isActive={row.sessionId === activeSessionId}
+      now={now}
+      onSelect={onSelect}
+      onAcknowledge={onAcknowledge}
+      onRenameSession={onRenameSession}
+      onSetDisposition={onSetDisposition}
+      onPin={onPin}
+    />
   );
 
   return (
     <div className="space-y-0.5">
-      {ordered.map((row, index) => (
-        <div
-          key={row.sessionId}
-          className={row.parentSessionId && listedIds.has(row.parentSessionId) ? "ml-4" : undefined}
-        >
-          {index > 0 && index === firstUnpinned && (
-            <div className="mx-2 my-1 border-t border-gray-100" />
-          )}
-          <ActiveRow
-            row={row}
-            isActive={row.sessionId === activeSessionId}
-            now={now}
-            onSelect={onSelect}
-            onAcknowledge={onAcknowledge}
-            onRenameSession={onRenameSession}
-            onSetDisposition={onSetDisposition}
-            onPin={onPin}
-          />
-        </div>
-      ))}
+      {groups.map(({ row, subagents }, index) => {
+        // The subagent being viewed is never hidden behind its fold.
+        const open =
+          openParents.has(row.sessionId) || subagents.some((s) => s.sessionId === activeSessionId);
+        const running = subagents.filter((s) => s.runtimeStatus === "running").length;
+        return (
+          <div key={row.sessionId}>
+            {index > 0 && index === firstUnpinned && (
+              <div className="mx-2 my-1 border-t border-gray-100" />
+            )}
+            {renderRow(row)}
+            {subagents.length > 0 && (
+              <div className="ml-4">
+                <button
+                  type="button"
+                  onClick={() => toggle(row.sessionId)}
+                  aria-expanded={open}
+                  className="flex w-full items-center gap-1 rounded-md px-2 py-0.5 text-left text-xs text-gray-400 transition-colors hover:bg-gray-50 hover:text-gray-700"
+                >
+                  <CornerDownRight className="size-3 flex-shrink-0" />
+                  <span>
+                    {subagents.length === 1 ? "1 subagent" : `${subagents.length} subagents`}
+                    {running > 0 && running < subagents.length ? ` · ${running} running` : ""}
+                  </span>
+                  {open ? (
+                    <ChevronDown className="size-3 flex-shrink-0" />
+                  ) : (
+                    <ChevronRight className="size-3 flex-shrink-0" />
+                  )}
+                </button>
+                {open &&
+                  subagents.map((child) => <div key={child.sessionId}>{renderRow(child)}</div>)}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

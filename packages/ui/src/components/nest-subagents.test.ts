@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { nestSubagents, type ActiveSessionRow } from "./NavigationDrawer";
+import { groupSubagents, nestSubagents, type ActiveSessionRow } from "./NavigationDrawer";
 
 function row(sessionId: string, parentSessionId: string | null = null): ActiveSessionRow {
   return {
@@ -33,5 +33,20 @@ describe("nestSubagents", () => {
   test("nests a subagent's own subagents under it", () => {
     const rows = [row("grandchild", "child"), row("child", "root"), row("root")];
     expect(ids(nestSubagents(rows))).toEqual(["root", "child", "grandchild"]);
+  });
+});
+
+describe("groupSubagents", () => {
+  test("folds every descendant under its top-level parent", () => {
+    const rows = [row("grandchild", "child"), row("other"), row("child", "root"), row("root")];
+    expect(groupSubagents(rows).map((g) => [g.row.sessionId, ids(g.subagents)])).toEqual([
+      ["other", []],
+      ["root", ["child", "grandchild"]],
+    ]);
+  });
+
+  test("an orphan subagent is its own top-level row", () => {
+    const groups = groupSubagents([row("orphan", "gone")]);
+    expect(groups.map((g) => [g.row.sessionId, ids(g.subagents)])).toEqual([["orphan", []]]);
   });
 });
