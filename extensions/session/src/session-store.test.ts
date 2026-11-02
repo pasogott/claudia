@@ -485,7 +485,11 @@ describe("session store", () => {
         touchSession("ses_child", "completed");
         expect(listed()).toBeUndefined();
 
-        // Stuck again: back in the list.
+        // A quiet pane the reconnect sweep calls stalled is still finished.
+        touchSession("ses_child", "stalled");
+        expect(listed()).toBeUndefined();
+
+        // Failed: back in the list, because that needs someone.
         touchSession("ses_child", "failed");
         expect(listed()?.parentSessionId).toBe("ses_coord");
       });

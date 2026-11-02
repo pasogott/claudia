@@ -1131,12 +1131,14 @@ export function listAttentionSessions(options?: {
          FROM sessions s
          JOIN workspaces w ON w.id = s.workspace_id
         WHERE (s.purpose = 'chat'
-               -- Subagents only while they're working or stuck. A finished
-               -- one has handed its result to its parent, which is where
-               -- that result gets acted on; listing it would only add a
-               -- "done, unacknowledged" row for Michael to clear.
+               -- Subagents only while they're working, waiting on a human, or
+               -- failed. A finished one has handed its result to its parent,
+               -- which is where that result gets acted on; listing it would
+               -- only add a "done, unacknowledged" row for Michael to clear.
+               -- Not 'stalled': the reconnect sweep writes that for any live
+               -- pane gone quiet, finished subagents included.
                OR (s.purpose IN ('subagent','review','test')
-                   AND s.runtime_status IN ('running','awaiting_input','awaiting_approval','failed','stalled')))
+                   AND s.runtime_status IN ('running','awaiting_input','awaiting_approval','failed')))
           AND s.status = 'active'
           AND w.deleted_at IS NULL
           AND s.disposition IN ('open','needs_review','blocked','snoozed')
