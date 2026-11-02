@@ -248,6 +248,50 @@ export function insertTranscriptEntriesRaw(entries: InsertEntry[]): void {
 }
 
 /**
+ * Whether a transcript belongs to a session that isn't a conversation with
+ * Michael: a subagent, or a legacy Codex task. Their work reaches memory
+ * through the summary they report to their parent, and their transcript stays
+ * readable in the session view, so Libby leaves them out (#107). Handoffs and
+ * unattended top-level runs are `chat` sessions and stay in.
+ *
+ * Reads the session extension's `sessions` table in the same database. A
+ * transcript with no row (a plain `claude` run outside Anima) is a chat, and a
+ * database without the table (standalone tests) excludes nothing.
+ */
+export function isNonChatSession(sessionId: string): boolean {
+  try {
+    const row = getDb()
+      .query("SELECT purpose FROM sessions WHERE provider_session_id = ?")
+      .get(sessionId) as { purpose: string } | null;
+    return row !== null && row.purpose !== "chat";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Take a transcript file back out of memory: its entries, and conversations
+ * Libby hasn't started on. Archived summaries (already written) and one she is
+ * processing right now are left alone. Caller manages the transaction.
+ */
+export function purgeFileFromMemory(sourceFile: string): {
+  entries: number;
+  conversations: number;
+} {
+  const d = getDb();
+  const entries = d
+    .query("DELETE FROM memory_transcript_entries WHERE source_file = ?")
+    .run(sourceFile).changes;
+  const conversations = d
+    .query(
+      `DELETE FROM memory_conversations
+       WHERE source_file = ? AND status IN ('active', 'ready', 'queued')`,
+    )
+    .run(sourceFile).changes;
+  return { entries, conversations };
+}
+
+/**
  * Delete all entries for a given source file (for re-import).
  */
 export function deleteEntriesForFile(sourceFile: string): number {

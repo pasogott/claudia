@@ -30,6 +30,8 @@ import {
   deleteEntriesForFile,
   getStuckFiles,
   rollbackStuckFile,
+  isNonChatSession,
+  purgeFileFromMemory,
   type InsertEntry,
 } from "./db";
 import { parseLines, sessionIdFromFilename } from "./parser";
@@ -220,6 +222,12 @@ export function ingestFile(
   const source = detectSource(filePath);
   const existing = getFileState(fileKey);
 
+  if (isNonChatSession(sessionIdFromFilename(filePath))) {
+    if (existing && stats.size === existing.lastProcessedOffset) return result;
+    skipNonChatFile(fileKey, source, stats, result);
+    return result;
+  }
+
   let offset = 0;
   let needsCleanup = false;
 
@@ -311,6 +319,37 @@ export function ingestFile(
   result.entriesInserted = insertEntries.length;
 
   return result;
+}
+
+/**
+ * A subagent's transcript stays out of memory (see `isNonChatSession`).
+ *
+ * Purging rather than just not inserting covers the race where the watcher
+ * reads a subagent's first lines before its session row exists: the next
+ * append finds the row and takes those lines back out. The offset still
+ * advances, so a scan doesn't re-read the file until it grows.
+ */
+function skipNonChatFile(
+  fileKey: string,
+  source: string,
+  stats: { size: number; mtimeMs: number },
+  result: IngestResult,
+): void {
+  getDb().transaction(() => {
+    markFileIngesting({
+      filePath: fileKey,
+      source,
+      lastModified: stats.mtimeMs,
+      fileSize: stats.size,
+    });
+    result.entriesDeleted = purgeFileFromMemory(fileKey).entries;
+    markFileIdle({
+      filePath: fileKey,
+      lastProcessedOffset: stats.size,
+      lastCommittedEntryId: null,
+      lastEntryTimestamp: null,
+    });
+  })();
 }
 
 /**
