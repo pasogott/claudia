@@ -31,7 +31,12 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import type { GatewayClient } from "@anima/shared/gateway-client";
 import { useGatewayClientContext } from "../contexts/GatewayClientContext";
-import type { SessionDisposition, SessionRefInfo, SessionRuntimeStatus } from "./useChatGateway";
+import type {
+  SessionDisposition,
+  SessionFolderInfo,
+  SessionRefInfo,
+  SessionRuntimeStatus,
+} from "./useChatGateway";
 
 export interface AttentionSession {
   sessionId: string;
@@ -51,6 +56,8 @@ export interface AttentionSession {
   /** Pinned rows sort ahead of the rest; the server orders them. */
   pinned: boolean;
   refs?: SessionRefInfo[];
+  /** Set when the session runs outside the workspace root. */
+  folder?: SessionFolderInfo;
 }
 
 /** How long a finished session waits before it stops being polite about it. */

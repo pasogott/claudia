@@ -34,6 +34,9 @@ import type {
   SessionStatusChangedEvent,
   SessionListChangedEvent,
   SessionDisposition,
+  WorkspaceFolderInfo,
+  WorkspaceFolderOperation,
+  WorkspaceFolderUpdate,
 } from "@anima/ui";
 import { createBridge } from "../app";
 import {
@@ -150,6 +153,17 @@ export interface ChatPageContextValue {
    * just a forced re-fetch from the UI's perspective.
    */
   onRefreshSessions: (workspace: WorkspaceInfo) => Promise<void>;
+  /** A workspace's folders, root first (#107). */
+  onLoadWorkspaceFolders: (workspaceId: string) => Promise<WorkspaceFolderInfo[]>;
+  /**
+   * Add, remove or re-root a workspace folder. Refreshes the workspace list
+   * (a new root changes its cwd) and the workspace's sessions (a merge brings
+   * new ones) afterwards.
+   */
+  onUpdateWorkspaceFolders: (
+    workspaceId: string,
+    operation: WorkspaceFolderOperation,
+  ) => Promise<WorkspaceFolderUpdate>;
 }
 
 const ChatPageContext = createContext<ChatPageContextValue | null>(null);
@@ -498,6 +512,43 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
     [callGateway],
   );
 
+  const onLoadWorkspaceFolders = useCallback(
+    async (workspaceId: string): Promise<WorkspaceFolderInfo[]> => {
+      const result = await callGateway<{ folders?: WorkspaceFolderInfo[] }>(
+        "session.get_workspace",
+        { id: workspaceId },
+      );
+      return result?.folders ?? [];
+    },
+    [callGateway],
+  );
+
+  const onUpdateWorkspaceFolders = useCallback(
+    async (
+      workspaceId: string,
+      operation: WorkspaceFolderOperation,
+    ): Promise<WorkspaceFolderUpdate> => {
+      const result = await callGateway<{
+        workspace: WorkspaceInfo;
+        folders: WorkspaceFolderInfo[];
+        notes: string[];
+      }>("session.update_workspace", { id: workspaceId, ...operation });
+      const wsResult = await callGateway<{ workspaces?: WorkspaceInfo[] }>(
+        "session.list_workspaces",
+      );
+      if (wsResult?.workspaces) setWorkspaces(wsResult.workspaces);
+      if (result?.workspace) {
+        const sessions = await loadSessionsForWorkspace(callGateway, result.workspace.cwd, {
+          limit: SESSIONS_PAGE_SIZE,
+          offset: 0,
+        });
+        setSessionsForWorkspace(workspaceId, sessions.sessions, sessions.hasMore);
+      }
+      return { folders: result?.folders ?? [], notes: result?.notes ?? [] };
+    },
+    [callGateway, setSessionsForWorkspace],
+  );
+
   const onGetDirectories = useCallback(
     async (path: string): Promise<{ path: string; directories: string[] }> => {
       const result = await callGateway<{ path: string; directories: string[] }>(
@@ -804,6 +855,8 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
       onLoadMoreSessions,
       onPinWorkspace,
       onRefreshSessions,
+      onLoadWorkspaceFolders,
+      onUpdateWorkspaceFolders,
     }),
     [
       workspaces,
@@ -828,6 +881,8 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
       onLoadMoreSessions,
       onPinWorkspace,
       onRefreshSessions,
+      onLoadWorkspaceFolders,
+      onUpdateWorkspaceFolders,
     ],
   );
 

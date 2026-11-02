@@ -48,11 +48,14 @@ import {
   CornerDownRight,
   ChevronDown,
   ChevronRight,
+  FolderTree,
+  GitBranch,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type {
   WorkspaceInfo,
   SessionInfo,
+  SessionFolderInfo,
   SessionRefInfo,
   SessionSearchHit,
   SessionSearchResult,
@@ -66,6 +69,7 @@ export type WorkspaceMenuAction =
   | "pin"
   | "refresh"
   | "openInFinder"
+  | "folders"
   | "createWorktree"
   | "rename"
   | "archive"
@@ -153,6 +157,8 @@ export interface ActiveSessionRow {
   pinned: boolean;
   /** Set on a subagent: the session that spawned it. Shown nested under it. */
   parentSessionId?: string | null;
+  /** Set when the session runs outside its workspace's root: a worktree, say. */
+  folder?: SessionFolderInfo;
 }
 
 /**
@@ -518,8 +524,10 @@ function ActiveRow({
             )}
             <span className="truncate">
               {row.parentSessionId ? "subagent · " : ""}
-              {row.workspaceName} · {elapsedLabel(row.waitingSince, now)}
+              {row.workspaceName}
             </span>
+            {row.folder && <FolderChip folder={row.folder} />}
+            <span className="flex-shrink-0">· {elapsedLabel(row.waitingSince, now)}</span>
           </span>
         </span>
       </button>
@@ -680,6 +688,29 @@ function DispositionChip({ disposition }: { disposition?: SessionDisposition }) 
   );
 }
 
+/**
+ * Which folder a session runs in, when it isn't the workspace root (#107).
+ *
+ * A worktree shows its branch, anything else the folder's name; the full path
+ * is the tooltip. A folder that moved or is gone is struck through: the
+ * session's history is still there, but it can't resume in that folder.
+ */
+function FolderChip({ folder }: { folder: SessionFolderInfo }) {
+  const Icon = folder.kind === "worktree" ? GitBranch : FolderTree;
+  const title = folder.inactive ? `${folder.path} (folder is gone)` : folder.path;
+  return (
+    <span
+      title={title}
+      className={`inline-flex min-w-0 max-w-[40%] flex-shrink-0 items-center gap-0.5 rounded bg-gray-100 px-1 text-[11px] leading-4 ${
+        folder.inactive ? "text-gray-400 line-through" : "text-gray-500"
+      }`}
+    >
+      <Icon className="size-3 flex-shrink-0" aria-hidden="true" />
+      <span className="truncate">{folder.label}</span>
+    </span>
+  );
+}
+
 // ── Click-outside hook ──────────────────────────────────────────
 
 function useClickOutside<T extends HTMLElement>(
@@ -809,6 +840,7 @@ function SessionRow({
           <span className="min-w-0 flex-1">
             <span className="flex min-w-0 items-center gap-1.5">
               <span className="min-w-0 flex-1 truncate">{formatSessionName(session)}</span>
+              {session.folder && <FolderChip folder={session.folder} />}
               {runtimeHoldsTheSlot(session.runtimeStatus, session.disposition) && (
                 <DispositionChip disposition={session.disposition} />
               )}
@@ -1319,6 +1351,14 @@ function WorkspaceItem({
                 onClick={() => {
                   setMenuOpen(false);
                   onMenuAction?.("openInFinder", workspace);
+                }}
+              />
+              <WorkspaceMenuItem
+                icon={FolderTree}
+                label="Folders…"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onMenuAction?.("folders", workspace);
                 }}
               />
               <WorkspaceMenuItem

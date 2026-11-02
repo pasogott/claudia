@@ -493,7 +493,8 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
   },
   {
     name: "session.get_workspace",
-    description: "Get workspace by ID",
+    description:
+      "Get a workspace by ID, with its folders (root first; kind root | worktree | added; inactiveAt set on a folder that moved or is gone)",
     inputSchema: z.object({
       id: z.string().describe("Workspace ID"),
     }),

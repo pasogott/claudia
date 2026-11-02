@@ -46,6 +46,7 @@ import {
 } from "./session-store";
 import { applyDisposition, emitListChanged, emitStatusChanged } from "./session-status-events";
 import { searchSessions } from "./session-search";
+import { labelSessionFolders } from "./session-folder";
 import { handoffSchema, workspaceFindSchema, workspaceUpdateSchema } from "./session-methods";
 
 function expandHome(path: string): string {
@@ -211,7 +212,11 @@ export function createSessionReadHandlers(): Record<string, SessionMethodHandler
     },
     "session.get_workspace": async (params) => {
       const rt = getRuntime();
-      return { workspace: rt.registry.getWorkspace(params.id as string) };
+      const workspace = rt.registry.getWorkspace(params.id as string);
+      return {
+        workspace,
+        folders: workspace ? rt.registry.workspaceFolders.list(workspace.id) : [],
+      };
     },
     "session.get_directories": async (params) => {
       const path = (params.path as string | undefined) || "~";
@@ -221,10 +226,13 @@ export function createSessionReadHandlers(): Record<string, SessionMethodHandler
       listCommands({ cwd: params.cwd as string | undefined }),
     "session.list_files": async (params) => listFiles({ cwd: params.cwd as string }),
     "session.list_attention": async (params) => ({
-      sessions: listAttentionSessions({
-        limit: params.limit as number | undefined,
-        excludeWorkspaces: resolveQueueExclusions(),
-      }),
+      sessions: labelSessionFolders(
+        listAttentionSessions({
+          limit: params.limit as number | undefined,
+          excludeWorkspaces: resolveQueueExclusions(),
+        }),
+        { getMetadata: (sessionId) => getStoredSession(sessionId)?.metadata },
+      ),
     }),
     "session.health_check": async () => healthCheckDetailed(),
     "session.rotate_persistent_sessions": async () => {

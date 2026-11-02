@@ -1189,7 +1189,10 @@ describe("session extension", () => {
 
     const fetched = await ext.handleMethod("session.get_workspace", { id: "ws-1" });
     expect(getWorkspaceSpy).toHaveBeenCalledWith("ws-1");
-    expect(fetched).toEqual({ workspace: getWorkspaceSpy.mock.results[0]?.value });
+    expect(fetched).toEqual({
+      workspace: getWorkspaceSpy.mock.results[0]?.value,
+      folders: expect.any(Array),
+    });
 
     const created = await ext.handleMethod("session.get_or_create_workspace", {
       cwd: "/repo/new-project",

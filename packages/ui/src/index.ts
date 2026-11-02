@@ -61,6 +61,8 @@ export type {
   UseChatGatewayReturn,
   WorkspaceInfo,
   SessionInfo,
+  SessionFolderInfo,
+  WorkspaceFolderInfo,
   SessionSearchHit,
   SessionSearchResult,
   SessionRuntimeStatus,
@@ -100,3 +102,8 @@ export type {
   ActiveSessionRow,
 } from "./components/NavigationDrawer";
 export { CreateWorkspaceModal } from "./components/CreateWorkspaceModal";
+export { WorkspaceFoldersModal } from "./components/WorkspaceFoldersModal";
+export type {
+  WorkspaceFolderOperation,
+  WorkspaceFolderUpdate,
+} from "./components/WorkspaceFoldersModal";

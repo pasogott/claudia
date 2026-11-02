@@ -46,6 +46,30 @@ export interface SessionRefInfo {
   url?: string;
 }
 
+/**
+ * The folder a session runs in when it isn't its workspace's root (#107):
+ * a worktree, an added folder, or a subfolder. Mirrors `SessionFolder` in the
+ * session extension.
+ */
+export interface SessionFolderInfo {
+  kind: "worktree" | "added" | "subfolder";
+  /** A worktree's branch, otherwise the folder's name. */
+  label: string;
+  path: string;
+  /** The folder moved or is gone. */
+  inactive: boolean;
+}
+
+/** One folder of a workspace, as `session.get_workspace` returns it. */
+export interface WorkspaceFolderInfo {
+  path: string;
+  workspaceId: string;
+  kind: "root" | "worktree" | "added";
+  /** Set when the folder moved or is gone; it stays so its sessions keep their workspace. */
+  inactiveAt: string | null;
+  createdAt: string;
+}
+
 export interface SessionInfo {
   sessionId: string;
   created?: string;
@@ -65,6 +89,8 @@ export interface SessionInfo {
   previousSessionId?: string;
   /** The session this one handed its work to (`session.handoff`). */
   handedOffTo?: string;
+  /** Set when the session runs outside the workspace root: drives the folder chip. */
+  folder?: SessionFolderInfo;
 }
 
 /** Mirrors `RuntimeStatus` in the session extension's store. */

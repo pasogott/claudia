@@ -19,18 +19,20 @@ export async function emitGitStatus(sessionId: string): Promise<void> {
       log.warn("emitGitStatus: no stored session", { sessionId: shortId(sessionId) });
       return;
     }
-    const workspace = getWorkspace(stored.workspaceId);
-    if (!workspace?.cwd) {
-      log.warn("emitGitStatus: no workspace cwd", {
+    // The session's own folder, not the workspace root: a session in a
+    // worktree is on the worktree's branch.
+    const cwd = stored.cwd ?? getWorkspace(stored.workspaceId)?.cwd;
+    if (!cwd) {
+      log.warn("emitGitStatus: no cwd", {
         sessionId: shortId(sessionId),
         workspaceId: stored.workspaceId,
       });
       return;
     }
-    log.info("emitGitStatus collecting", { cwd: workspace.cwd });
-    const status = await collectGitStatus(workspace.cwd);
+    log.info("emitGitStatus collecting", { cwd });
+    const status = await collectGitStatus(cwd);
     log.info("emitGitStatus collected", {
-      cwd: workspace.cwd,
+      cwd,
       branch: status.branch,
       pr: status.pr ? `#${status.pr.number}` : status.pr === undefined ? "unknown" : "none",
     });

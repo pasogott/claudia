@@ -6,9 +6,11 @@
  * (or pass through to extension methods) once the backend supports them.
  */
 
+import { useState } from "react";
 import {
   NavigationDrawer,
   CreateWorkspaceModal,
+  WorkspaceFoldersModal,
   logout,
   useAttentionSessions,
   type ActiveSessionRow,
@@ -40,7 +42,10 @@ export function NavPanel() {
     onLoadMoreSessions,
     onPinWorkspace,
     onRefreshSessions,
+    onLoadWorkspaceFolders,
+    onUpdateWorkspaceFolders,
   } = useChatPage();
+  const [foldersWorkspace, setFoldersWorkspace] = useState<WorkspaceInfo | null>(null);
 
   // The ACTIVE pane's data. Shares one poller with the app-wide banner — two
   // views of "what needs you" that disagreed would undercut the entire point.
@@ -56,6 +61,7 @@ export function NavPanel() {
     waitingSince: s.waitingSince,
     pinned: s.pinned,
     parentSessionId: s.parentSessionId ?? null,
+    folder: s.folder,
   }));
 
   const onWorkspaceMenuAction = (action: WorkspaceMenuAction, workspace: WorkspaceInfo) => {
@@ -65,6 +71,10 @@ export function NavPanel() {
     }
     if (action === "refresh") {
       void onRefreshSessions(workspace);
+      return;
+    }
+    if (action === "folders") {
+      setFoldersWorkspace(workspace);
       return;
     }
     // Other actions (Open in Finder, Worktree, Rename, Archive, Remove)
@@ -110,6 +120,12 @@ export function NavPanel() {
         onSubmit={onCreateWorkspace}
         onGetDirectories={onGetDirectories}
         isCreating={isCreatingWorkspace}
+      />
+      <WorkspaceFoldersModal
+        workspace={foldersWorkspace}
+        onClose={() => setFoldersWorkspace(null)}
+        onLoad={onLoadWorkspaceFolders}
+        onUpdate={onUpdateWorkspaceFolders}
       />
     </>
   );

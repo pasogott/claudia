@@ -1,12 +1,12 @@
 import { createLogger, shortId } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import type { SessionIndexEntry } from "../claude-projects";
 import { reconcileWorkspace } from "../session-reconciler";
 import type { MemoryContextResult } from "../memory-context";
 import { formatMemoryContext } from "../memory-context";
 import { resolveSessionPath, parseSessionFilePaginated, parseSessionUsage } from "../parse-session";
-import { listWorkspaceSessions, getStoredSession } from "../session-store";
+import { listWorkspaceSessions, getStoredSession, type SessionListInfo } from "../session-store";
+import { labelSessionFolders, type SessionFolder } from "../session-folder";
 import { getRuntime } from "../runtime";
 
 const log = createLogger("SessionExt:Query", join(homedir(), ".anima", "logs", "session.log"));
@@ -29,7 +29,11 @@ const log = createLogger("SessionExt:Query", join(homedir(), ".anima", "logs", "
 export function listSessions(
   cwd: string,
   options?: { limit?: number; offset?: number },
-): { sessions: SessionIndexEntry[]; total: number; hasMore: boolean } {
+): {
+  sessions: Array<SessionListInfo & { folder?: SessionFolder }>;
+  total: number;
+  hasMore: boolean;
+} {
   const rt = getRuntime();
   const workspaceResult = rt.registry.getOrCreateWorkspace(cwd);
   const workspaceId = workspaceResult.workspace.id;
@@ -61,7 +65,11 @@ export function listSessions(
     offset,
     limit: limit ?? "all",
   });
-  return { sessions: sliced, total: sorted.length, hasMore };
+  const sessions = labelSessionFolders(sliced, {
+    workspaceId,
+    getMetadata: (sessionId) => getStoredSession(sessionId)?.metadata,
+  });
+  return { sessions, total: sorted.length, hasMore };
 }
 
 export function getHistory(params: {
