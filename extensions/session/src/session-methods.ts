@@ -571,10 +571,18 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
   {
     name: "session.delete_workspace",
     description:
-      "Delete a workspace by CWD. Soft: it's hidden (with its sessions) until get_or_create_workspace restores it.",
-    inputSchema: z.object({
-      cwd: z.string().describe("Working directory of workspace to delete"),
-    }),
+      "Delete a workspace by id (preferred) or root folder. Soft: it's hidden (with its sessions) until get_or_create_workspace restores it. Returns the workspace it deleted",
+    inputSchema: z
+      .object({
+        id: z.string().optional().describe("Workspace ID; wins over cwd"),
+        cwd: z
+          .string()
+          .optional()
+          .describe(
+            "Root folder of the workspace to delete. The CLI fills this from the shell, so pass id to be sure",
+          ),
+      })
+      .refine((p) => p.id || p.cwd, "Pass id or cwd"),
     execution: { lane: "write", concurrency: "serial" },
   },
   {

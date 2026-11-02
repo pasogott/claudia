@@ -602,7 +602,20 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
     },
     "session.delete_workspace": async (params) => {
       const rt = getRuntime();
-      return { deleted: rt.registry.deleteWorkspace(params.cwd as string) };
+      // The id wins: the CLI fills `cwd` from the shell, so a bare cwd can name
+      // whatever folder the caller happens to be standing in.
+      const id = params.id as string | undefined;
+      const target = id ? rt.registry.getWorkspace(id) : null;
+      if (id && !target) throw new Error(`Unknown workspace: ${id}`);
+      const root = target?.cwd ?? expandHome(params.cwd as string);
+      const deleted = rt.registry.deleteWorkspace(root);
+      const workspace = target ?? rt.registry.getWorkspaceByCwd(root);
+      return {
+        deleted,
+        workspace: workspace
+          ? { id: workspace.id, name: workspace.name, cwd: workspace.cwd }
+          : null,
+      };
     },
     "session.update_workspace": async (params) => {
       const rt = getRuntime();

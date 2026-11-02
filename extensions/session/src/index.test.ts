@@ -1209,6 +1209,30 @@ describe("session extension", () => {
     await ext.stop();
   });
 
+  it("delete_workspace: an id wins over the cwd the CLI fills in, and the target is reported", async () => {
+    const deleteSpy = spyOn(workspace, "deleteWorkspace").mockReturnValue(true);
+    const ext = createSessionExtension();
+    await ext.start(createTestContext());
+
+    const result = (await ext.handleMethod("session.delete_workspace", {
+      id: "ws-1",
+      cwd: "/where/the/shell/happens/to/be",
+    })) as { deleted: boolean; workspace: { id: string; cwd: string } | null };
+    const target = getWorkspaceSpy.mock.results.at(-1)?.value as { cwd: string };
+    expect(deleteSpy).toHaveBeenCalledWith(target.cwd);
+    expect(result.deleted).toBe(true);
+    expect(result.workspace).toMatchObject({ id: "ws-1", cwd: target.cwd });
+
+    getWorkspaceSpy.mockReturnValueOnce(null);
+    await expect(
+      ext.handleMethod("session.delete_workspace", { id: "ws-missing", cwd: "/x" }),
+    ).rejects.toThrow("Unknown workspace: ws-missing");
+    expect(deleteSpy).toHaveBeenCalledTimes(1);
+
+    deleteSpy.mockRestore();
+    await ext.stop();
+  });
+
   it("lists child directories with tilde expansion and sorts dot-directories last", async () => {
     const ext = createSessionExtension();
     await ext.start(createTestContext());
