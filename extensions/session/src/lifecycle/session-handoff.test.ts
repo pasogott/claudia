@@ -25,6 +25,7 @@ function recordingDeps(caller: HandoffCaller | null = CALLER) {
   const files: string[] = [];
   const handedOff: Array<[string, string]> = [];
   const announced: HandoffEventPayload[] = [];
+  const worktrees: Array<Record<string, unknown>> = [];
   let failPrompt = false;
   const deps: HandoffDeps = {
     getSession: (id) => (caller && id === caller.id ? caller : null),
@@ -60,6 +61,11 @@ function recordingDeps(caller: HandoffCaller | null = CALLER) {
       calls.push("announce");
       announced.push(payload);
     },
+    createWorktree: async (request) => {
+      calls.push("worktree");
+      worktrees.push(request);
+      return { path: `${request.folder}.worktrees/${request.branch}` };
+    },
   };
   return {
     deps,
@@ -69,6 +75,7 @@ function recordingDeps(caller: HandoffCaller | null = CALLER) {
     files,
     handedOff,
     announced,
+    worktrees,
     failNextPrompt: () => {
       failPrompt = true;
     },
@@ -183,6 +190,46 @@ describe("handOffSession", () => {
     expect(r.announced).toEqual([]);
   });
 
+  test("worktree: bootstraps one off the caller's repo and starts the session in it", async () => {
+    const r = recordingDeps();
+    r.deps.getProfile = () => "auto";
+    const result = await handOffSession(
+      {
+        sessionId: "old-1",
+        title: "R2 phase 2",
+        promptFile: "tmp/r2/HANDOFF.md",
+        worktree: "r2-phase2",
+        worktreeBase: "origin/main",
+      },
+      r.deps,
+    );
+    expect(r.worktrees).toEqual([
+      { branch: "r2-phase2", base: "origin/main", folder: "/repo", profile: "auto" },
+    ]);
+    // The prompt file is still read from the caller's folder (the worktree
+    // links tmp/ back to it anyway).
+    expect(r.files).toEqual(["/repo/tmp/r2/HANDOFF.md"]);
+    expect(r.drafts[0]?.cwd).toBe("/repo.worktrees/r2-phase2");
+    expect(r.prompts[0]?.cwd).toBe("/repo.worktrees/r2-phase2");
+    expect(result.cwd).toBe("/repo.worktrees/r2-phase2");
+    expect(r.calls).toEqual(["worktree", "create", "title", "prompt", "mark", "announce"]);
+  });
+
+  test("worktree: refuses targetCwd alongside it, and an empty prompt makes no worktree", async () => {
+    const r = recordingDeps();
+    await expect(
+      handOffSession(
+        { sessionId: "old-1", title: "t", prompt: "p", worktree: "b", targetCwd: "/other" },
+        r.deps,
+      ),
+    ).rejects.toThrow("not both");
+    r.deps.readFile = () => "";
+    await expect(
+      handOffSession({ sessionId: "old-1", title: "t", promptFile: "x.md", worktree: "b" }, r.deps),
+    ).rejects.toThrow("Handoff prompt is empty");
+    expect(r.calls).toEqual([]);
+  });
+
   test("refuses an empty prompt file", async () => {
     const r = recordingDeps();
     r.deps.readFile = () => "  \n";
@@ -202,6 +249,15 @@ describe("handoffSchema", () => {
     expect(handoffSchema.safeParse({ ...base, prompt: "p", promptFile: "f.md" }).success).toBe(
       false,
     );
+  });
+
+  test("worktree excludes targetCwd, and worktreeBase needs worktree", () => {
+    const base = { sessionId: "s", title: "t", prompt: "p" };
+    expect(handoffSchema.safeParse({ ...base, worktree: "feat/x" }).success).toBe(true);
+    expect(handoffSchema.safeParse({ ...base, worktree: "x", targetCwd: "/a" }).success).toBe(
+      false,
+    );
+    expect(handoffSchema.safeParse({ ...base, worktreeBase: "origin/main" }).success).toBe(false);
   });
 
   test("trims the title and rejects a blank one", () => {

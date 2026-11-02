@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+#
+# create_worktree: Anima's default worktree bootstrap (#106).
+#
+# Creates (or reuses) a git worktree for <branch> beside the main checkout, at
+# <repo>.worktrees/<branch>, and makes it behave like part of the project:
+#   - the main checkout's tmp/ (notes, handoffs, working files) is symlinked in
+#   - a CodeGraph index is seeded from the main checkout's, then synced
+#
+# Usage:
+#   create_worktree <branch> [--base <ref>]
+#
+#   <branch>      Branch to check out. Reused when it exists locally, tracked
+#                 when only origin has it, otherwise created from --base.
+#   --base <ref>  Start point for a new branch. Default: origin's default
+#                 branch, freshly fetched (or HEAD when there is no origin).
+#
+# Environment (set by Anima; computed from the current folder when absent):
+#   ANIMA_MAIN_REPO      the main checkout
+#   ANIMA_WORKTREE_PATH  where the worktree goes
+#
+# Progress goes to stderr. The worktree path is the only thing on stdout.
+#
+# A project can replace this with an executable <repo>/tmp/scripts/create_worktree,
+# which gets the same arguments and environment, plus ANIMA_DEFAULT_WORKTREE_SCRIPT
+# (this file) so it can run the default first and add its own steps after.
+#
+set -euo pipefail
+
+log() { printf '  %s\n' "$*" >&2; }
+die() { printf 'create_worktree: %s\n' "$*" >&2; exit 1; }
+
+[ $# -ge 1 ] || die "usage: create_worktree <branch> [--base <ref>]"
+BRANCH="$1"; shift
+BASE=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --base) [ $# -ge 2 ] || die "--base needs a ref"; BASE="$2"; shift 2 ;;
+    *) die "unknown argument: $1" ;;
+  esac
+done
+
+git check-ref-format --branch "$BRANCH" >/dev/null 2>&1 || die "not a valid branch name: $BRANCH"
+
+if [ -n "${ANIMA_MAIN_REPO:-}" ]; then
+  MAIN_REPO="$ANIMA_MAIN_REPO"
+else
+  # The main checkout is the parent of the shared git dir, even from a worktree.
+  COMMON_DIR="$(git rev-parse --path-format=absolute --git-common-dir)" || die "not in a git repository"
+  MAIN_REPO="$(dirname "$COMMON_DIR")"
+fi
+WORKTREE_PATH="${ANIMA_WORKTREE_PATH:-$MAIN_REPO.worktrees/$BRANCH}"
+
+git -C "$MAIN_REPO" rev-parse --git-dir >/dev/null 2>&1 || die "no git repository at $MAIN_REPO"
+MAIN_COMMON="$(git -C "$MAIN_REPO" rev-parse --path-format=absolute --git-common-dir)"
+
+# ── 1. Worktree ──────────────────────────────────────────────────────────────
+HAS_ORIGIN=0
+if git -C "$MAIN_REPO" remote get-url origin >/dev/null 2>&1; then
+  HAS_ORIGIN=1
+  log "Fetching origin…"
+  git -C "$MAIN_REPO" fetch --quiet origin || log "fetch failed; using what is already here"
+fi
+
+if [ -e "$WORKTREE_PATH" ]; then
+  EXISTING_COMMON="$(git -C "$WORKTREE_PATH" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  [ "$EXISTING_COMMON" = "$MAIN_COMMON" ] || die "$WORKTREE_PATH exists and is not a worktree of $MAIN_REPO"
+  log "Reusing the worktree at $WORKTREE_PATH"
+elif git -C "$MAIN_REPO" show-ref --verify --quiet "refs/heads/$BRANCH"; then
+  log "Checking out existing branch $BRANCH"
+  git -C "$MAIN_REPO" worktree add --quiet "$WORKTREE_PATH" "$BRANCH" >&2
+elif [ "$HAS_ORIGIN" = 1 ] && git -C "$MAIN_REPO" show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
+  log "Tracking origin/$BRANCH"
+  git -C "$MAIN_REPO" worktree add --quiet --track -b "$BRANCH" "$WORKTREE_PATH" "origin/$BRANCH" >&2
+else
+  if [ -z "$BASE" ]; then
+    if [ "$HAS_ORIGIN" = 1 ]; then
+      DEFAULT="$(git -C "$MAIN_REPO" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+      if [ -z "$DEFAULT" ]; then
+        for candidate in origin/main origin/master; do
+          if git -C "$MAIN_REPO" show-ref --verify --quiet "refs/remotes/$candidate"; then
+            DEFAULT="$candidate"; break
+          fi
+        done
+      fi
+      BASE="${DEFAULT:-HEAD}"
+    else
+      BASE="HEAD"
+    fi
+  fi
+  log "Creating branch $BRANCH from $BASE"
+  # --no-track: a branch started from origin/main must not push to main.
+  git -C "$MAIN_REPO" worktree add --quiet --no-track -b "$BRANCH" "$WORKTREE_PATH" "$BASE" >&2
+fi
+
+# ── 2. Shared tmp/ ───────────────────────────────────────────────────────────
+# tmp/ is gitignored, so a fresh checkout has none; the notes and handoff
+# prompts a session is pointed at live in the main checkout's.
+if [ -d "$MAIN_REPO/tmp" ] && [ ! -e "$WORKTREE_PATH/tmp" ] && [ ! -L "$WORKTREE_PATH/tmp" ]; then
+  ln -s "$MAIN_REPO/tmp" "$WORKTREE_PATH/tmp"
+  log "tmp/ → $MAIN_REPO/tmp"
+fi
+# A `tmp/` ignore pattern only matches directories, and git sees the link as a
+# file, so ignore it by name (info/exclude is shared by every worktree).
+if [ -L "$WORKTREE_PATH/tmp" ] && ! git -C "$WORKTREE_PATH" check-ignore -q tmp; then
+  mkdir -p "$MAIN_COMMON/info"
+  printf '/tmp\n' >> "$MAIN_COMMON/info/exclude"
+fi
+
+# ── 3. CodeGraph ─────────────────────────────────────────────────────────────
+MAIN_DB="$MAIN_REPO/.codegraph/codegraph.db"
+WT_DB="$WORKTREE_PATH/.codegraph/codegraph.db"
+SQLITE="$(command -v /usr/bin/sqlite3 || command -v sqlite3 || true)"
+if [ -f "$MAIN_DB" ] && [ ! -f "$WT_DB" ] && [ -n "$SQLITE" ] && command -v codegraph >/dev/null 2>&1; then
+  log "Seeding CodeGraph from the main checkout's index…"
+  mkdir -p "$WORKTREE_PATH/.codegraph"
+  # .backup, not cp: a consistent snapshot while main's daemon writes to the WAL.
+  if "$SQLITE" "$MAIN_DB" ".backup '$WT_DB'"; then
+    ( cd "$WORKTREE_PATH" && codegraph sync >&2 ) || log "codegraph sync failed (the index may be stale)"
+  else
+    log "CodeGraph snapshot failed; skipping"
+  fi
+fi
+
+log "Worktree ready: $WORKTREE_PATH"
+printf '%s\n' "$WORKTREE_PATH"

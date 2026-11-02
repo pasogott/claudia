@@ -47,6 +47,12 @@ import {
 import { applyDisposition, emitListChanged, emitStatusChanged } from "./session-status-events";
 import { searchSessions } from "./session-search";
 import { labelSessionFolders } from "./session-folder";
+import {
+  checkWorktreeOptions,
+  createWorktree,
+  sessionFolder,
+  type WorktreeOptions,
+} from "./worktree";
 import { handoffSchema, workspaceFindSchema, workspaceUpdateSchema } from "./session-methods";
 
 function expandHome(path: string): string {
@@ -365,12 +371,19 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
         revalidate: params.revalidate as boolean | undefined,
       }),
     "session.create_session": async (params) => {
+      // Sessions created directly are Michael's (web, iOS, menubar, CLI).
+      const profile = (params.profile as string | undefined) ?? "yolo";
+      const cwd = (await sessionFolder(
+        params as WorktreeOptions,
+        params.cwd as string,
+        profile,
+      )) as string;
       const { sessionId } = createDraftSession({
         ...(params as unknown as DraftSessionParams),
-        // Sessions created directly are Michael's (web, iOS, menubar, CLI).
-        profile: (params.profile as string | undefined) ?? "yolo",
+        cwd,
+        profile,
       });
-      return { sessionId };
+      return { sessionId, cwd };
     },
     "session.send_prompt": async (params) => {
       const rt = getRuntime();
@@ -460,9 +473,16 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
       const rt = getRuntime();
       const request = { connectionId: rt.ctx.connectionId, tags: rt.ctx.tags };
       const name = params.name as string | undefined;
+      const profile = (params.profile as string | undefined) ?? rt.sessionConfig.spawnProfile;
 
       if (params.parentSessionId === NEW_SESSION_PARENT) {
-        return await startTopLevelSession(params as unknown as TopLevelSessionParams, {
+        const cwd = await sessionFolder(
+          params as WorktreeOptions,
+          params.cwd as string | undefined,
+          profile,
+        );
+        const topLevel = { ...params, cwd, profile } as unknown as TopLevelSessionParams;
+        return await startTopLevelSession(topLevel, {
           defaultProfile: rt.sessionConfig.spawnProfile,
           createDraft: createDraftSession,
           setTitle: (sessionId, title) => {
@@ -472,20 +492,30 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
         });
       }
 
+      // A child's worktree branches from the repo it names, else its parent's.
+      checkWorktreeOptions(params as WorktreeOptions);
+      const parentWorkspaceId = getStoredSession(params.parentSessionId as string)?.workspaceId;
+      const repoFolder =
+        (params.cwd as string | undefined) ??
+        (parentWorkspaceId ? rt.registry.getWorkspace(parentWorkspaceId)?.cwd : undefined);
+      const cwd = params.worktree
+        ? await sessionFolder(params as WorktreeOptions, repoFolder, profile)
+        : (params.cwd as string | undefined);
+
       const spawned = await spawnSubagent(
         {
           parentSessionId: params.parentSessionId as string,
           agent: params.agent as string | undefined,
           prompt: params.prompt as string,
           purpose: normalizeSubagentPurpose(params.purpose as string | undefined),
-          cwd: params.cwd as string | undefined,
+          cwd,
           model: params.model as string | undefined,
           systemPrompt: params.systemPrompt as string | undefined,
           thinking: params.thinking as boolean | undefined,
           effort: params.effort as string | undefined,
           sandbox: params.sandbox as "read-only" | "workspace-write" | "danger-full-access",
           metadata: params.metadata as Record<string, unknown> | undefined,
-          profile: (params.profile as string | undefined) ?? rt.sessionConfig.spawnProfile,
+          profile,
         },
         request,
       );
@@ -519,6 +549,7 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
         announce: (payload) => {
           rt.ctx.emit(`session.${payload.sessionId}.${HANDOFF_EVENT_TYPE}`, payload);
         },
+        createWorktree,
       });
       log.info("Session handed off", {
         from: shortId(result.previousSessionId),

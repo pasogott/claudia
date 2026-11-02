@@ -754,7 +754,10 @@ async function invokeMethod(
   params: Record<string, unknown>,
   outPath?: string,
 ): Promise<void> {
-  const client = createGatewayClient({ url: gatewayUrl });
+  // The gateway gives an extension request up to 5 minutes. Waiting less here
+  // only abandons a call the server is still doing (a handoff that bootstraps
+  // a worktree can take a minute), and the caller never learns how it ended.
+  const client = createGatewayClient({ url: gatewayUrl, requestTimeoutMs: 300_000 });
   const streamPrompt = method === "session.send_prompt";
   let stopStreamResolve: (() => void) | null = null;
   const stopStream = new Promise<void>((resolve) => {

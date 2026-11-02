@@ -1,6 +1,25 @@
 import { z } from "zod";
 import type { ExtensionMethodDefinition } from "@anima/shared";
 
+/** `worktree` / `worktreeBase`, shared by create_session, spawn_agent and handoff (#106). */
+const worktreeFields = (repoIs: string) => ({
+  worktree: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe(
+      `Start the session in a git worktree on this branch, at <repo>.worktrees/<branch> (created, or reused when it exists, then bootstrapped: tmp/ linked, CodeGraph seeded, or <repo>/tmp/scripts/create_worktree when executable). The repo is ${repoIs}`,
+    ),
+  worktreeBase: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "Start point for a new worktree branch; defaults to origin's default branch, freshly fetched",
+    ),
+});
+
 const SpawnAgentSchema = z.object({
   parentSessionId: z
     .string()
@@ -11,7 +30,13 @@ const SpawnAgentSchema = z.object({
   agent: z.string().optional().describe("Child agent/provider; defaults to the parent agent"),
   prompt: z.string().min(1).describe("Initial child-agent prompt"),
   purpose: z.enum(["subagent", "review", "test"]).optional().default("subagent"),
-  cwd: z.string().optional().describe("Working directory override"),
+  cwd: z
+    .string()
+    .optional()
+    .describe("Working directory override; with worktree, any folder in the repo to branch from"),
+  ...worktreeFields(
+    "the one cwd is in, else the parent's workspace root (for NEW, cwd is required)",
+  ),
   model: z.string().optional().describe("Model override"),
   systemPrompt: z
     .string()
@@ -50,6 +75,7 @@ export const handoffSchema = z
       .string()
       .optional()
       .describe("Folder for the new session; defaults to the caller's workspace"),
+    ...worktreeFields("the caller's workspace root; can't be combined with targetCwd"),
     model: z.string().optional().describe("Model; defaults to the caller's"),
     profile: z
       .string()
@@ -60,7 +86,9 @@ export const handoffSchema = z
   .refine(
     (p) => Boolean(p.prompt) !== Boolean(p.promptFile),
     "Pass exactly one of prompt, promptFile",
-  );
+  )
+  .refine((p) => !(p.worktree && p.targetCwd), "Pass worktree or targetCwd, not both")
+  .refine((p) => !p.worktreeBase || p.worktree, "worktreeBase needs worktree");
 
 const nullableText = z.string().max(500).nullable().optional();
 
@@ -150,7 +178,10 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
     name: "session.create_session",
     description: "Create a new agent session for a workspace CWD",
     inputSchema: z.object({
-      cwd: z.string().describe("Working directory"),
+      cwd: z
+        .string()
+        .describe("Working directory; with worktree, any folder in the repo to branch from"),
+      ...worktreeFields("the one cwd is in"),
       agent: z.string().optional().describe("Agent/provider (default: claude)"),
       model: z.string().optional().describe("Model to use"),
       systemPrompt: z.string().optional().describe("System prompt"),

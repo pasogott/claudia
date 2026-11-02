@@ -34,6 +34,9 @@ export interface HandoffParams {
   prompt?: string;
   promptFile?: string;
   targetCwd?: string;
+  /** Start the new session in a worktree of the caller's repo, on this branch. */
+  worktree?: string;
+  worktreeBase?: string;
   model?: string;
   profile?: string;
 }
@@ -70,6 +73,13 @@ export interface HandoffDeps {
   /** Record `handedOffTo` on the caller and resolve it. */
   markHandedOff: (sessionId: string, targetSessionId: string) => void;
   announce: (payload: HandoffEventPayload) => void;
+  /** Create (or reuse) and bootstrap a worktree of the repo `folder` is in; its path. */
+  createWorktree: (request: {
+    branch: string;
+    base?: string;
+    folder: string;
+    profile: string;
+  }) => Promise<{ path: string }>;
 }
 
 export interface HandoffResult {
@@ -133,17 +143,33 @@ export async function handOffSession(
     );
   }
 
+  if (params.worktree && params.targetCwd) {
+    throw new Error("Pass worktree or targetCwd, not both: the worktree decides the folder");
+  }
   const callerCwd = deps.getWorkspaceCwd(caller.workspaceId);
-  const cwd = params.targetCwd ? expandHome(params.targetCwd) : callerCwd;
-  if (!cwd) throw new Error(`No workspace folder for session ${caller.id}; pass targetCwd`);
+  const startCwd = params.targetCwd ? expandHome(params.targetCwd) : callerCwd;
+  if (!startCwd) throw new Error(`No workspace folder for session ${caller.id}; pass targetCwd`);
 
   // A relative prompt file is where the caller wrote it: in its own folder.
   const rawPrompt =
-    params.prompt ?? deps.readFile(resolve(callerCwd ?? cwd, expandHome(params.promptFile ?? "")));
+    params.prompt ??
+    deps.readFile(resolve(callerCwd ?? startCwd, expandHome(params.promptFile ?? "")));
   if (!rawPrompt.trim()) throw new Error("Handoff prompt is empty");
 
   const title = params.title.trim();
   const profile = params.profile ?? deps.getProfile(caller.id) ?? "yolo";
+
+  // Only once everything else checks out, so a bad call leaves no worktree.
+  const cwd = params.worktree
+    ? (
+        await deps.createWorktree({
+          branch: params.worktree,
+          base: params.worktreeBase,
+          folder: startCwd,
+          profile,
+        })
+      ).path
+    : startCwd;
 
   const draft = deps.createDraft({
     cwd,

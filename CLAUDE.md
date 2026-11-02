@@ -137,6 +137,19 @@ is reached two ways:
   `session.<caller>.handoff` on the caller's own stream, so only clients showing it follow: the web
   chat navigates, embedded clients adopt it in place, iOS voice mode retargets. A session hands off
   once. Code: `extensions/session/src/lifecycle/session-handoff.ts`.
+- **In a git worktree** — `handoff`, `create_session` and `spawn_agent` take `--worktree <branch>`
+  (plus `--worktreeBase <ref>`, default origin's default branch, freshly fetched). Anima creates or
+  reuses the branch in a worktree at `<repo>.worktrees/<branch>`, bootstraps it, and starts the
+  session there; workspace resolution files it under the repo's workspace. The repo is the caller's
+  workspace root (handoff; can't be combined with `--targetCwd`), or the one `cwd` is in (create,
+  spawn; a child spawn without `cwd` uses its parent's root). The default bootstrap
+  (`extensions/session/scripts/create_worktree`) links the main checkout's `tmp/` in (and ignores the
+  link by name: a `tmp/` pattern doesn't match a symlink) and seeds CodeGraph. An executable
+  `<repo>/tmp/scripts/create_worktree` replaces it: same args (`<branch> [--base <ref>]`), env
+  `ANIMA_MAIN_REPO`, `ANIMA_WORKTREE_PATH`, `ANIMA_SESSION_PROFILE`, `ANIMA_DEFAULT_WORKTREE_SCRIPT`
+  (to extend the default), last stdout line = the worktree path. Anima pre-trusts the folder for
+  any profile but yolo, whichever script ran. Nothing removes worktrees automatically. Code:
+  `extensions/session/src/worktree.ts`.
 
 ### Session permission profiles
 
