@@ -270,6 +270,45 @@ export function isNonChatSession(sessionId: string): boolean {
 }
 
 /**
+ * Every folder of the workspace `cwd` belongs to (#107), `cwd` first: its
+ * root, worktrees and added folders (inactive ones too: a moved folder's
+ * history is still the project's), plus the folders its chat sessions ran in,
+ * which is how subfolders count. Memory is per workspace, so a session in a
+ * worktree sees the conversations held in the root and the other way round.
+ *
+ * Reads the session extension's tables in the same database. A folder in no
+ * workspace, or a database without those tables (standalone tests), is just
+ * itself.
+ */
+export function workspaceFoldersFor(cwd: string): string[] {
+  try {
+    const d = getDb();
+    const owner = d
+      .query(
+        `SELECT workspace_id AS id FROM workspace_folders WHERE path = ?1
+         UNION ALL SELECT id FROM workspaces WHERE cwd = ?1
+         UNION ALL SELECT workspace_id FROM sessions WHERE cwd = ?1 AND purpose = 'chat'
+         LIMIT 1`,
+      )
+      .get(cwd) as { id: string } | null;
+    if (!owner) return [cwd];
+
+    const rows = d
+      .query(
+        `SELECT path FROM workspace_folders WHERE workspace_id = ?1
+         UNION SELECT cwd FROM workspaces WHERE id = ?1
+         UNION SELECT cwd FROM sessions
+          WHERE workspace_id = ?1 AND purpose = 'chat' AND cwd IS NOT NULL
+            AND cwd NOT IN (SELECT path FROM workspace_folders WHERE workspace_id != ?1)`,
+      )
+      .all(owner.id) as { path: string }[];
+    return [...new Set([cwd, ...rows.map((row) => row.path)])];
+  } catch {
+    return [cwd];
+  }
+}
+
+/**
  * Take a transcript file back out of memory: its entries, and conversations
  * Libby hasn't started on. Archived summaries (already written) and one she is
  * processing right now are left alone. Caller manages the transaction.
@@ -663,59 +702,68 @@ export function getQueuedCount(): number {
  * Matches by source_file pattern (encoded CWD) so ALL active conversations
  * for the workspace enter the Libby pipeline, not just the current session's.
  */
-export function transitionActiveConversationsByCwd(sourceFilePattern: string): number {
+export function transitionActiveConversationsByCwd(sourceFilePatterns: string[]): number {
+  if (sourceFilePatterns.length === 0) return 0;
   const result = getDb()
     .query(
       `UPDATE memory_conversations
        SET status = 'queued', status_at = datetime('now')
-       WHERE source_file LIKE ? AND status = 'active'`,
+       WHERE (${likeAny(sourceFilePatterns)}) AND status = 'active'`,
     )
-    .run(sourceFilePattern);
+    .run(...sourceFilePatterns);
   return result.changes;
 }
 
+/** `source_file LIKE ? OR …`, one per pattern. */
+function likeAny(patterns: string[]): string {
+  return patterns.map(() => "source_file LIKE ?").join(" OR ");
+}
+
 /**
- * Get the most recent transcript entries across all sessions for a workspace.
- * Queries by the `cwd` column (absolute path) directly.
- * Returns entries in chronological order (oldest first).
+ * Get the most recent transcript entries across all sessions in a workspace's
+ * folders (`workspaceFoldersFor`). Queries by the `cwd` column (absolute
+ * path) directly. Returns entries in chronological order (oldest first).
  */
 export function getRecentTranscriptEntries(
-  cwd: string,
+  cwds: string[],
   limit: number,
 ): Array<{ role: string; content: string; timestamp: string }> {
+  if (cwds.length === 0) return [];
   const rows = getDb()
     .query(
       `SELECT role, content, timestamp
        FROM memory_transcript_entries
-       WHERE cwd = ? AND tool_names IS NULL
+       WHERE cwd IN (${cwds.map(() => "?").join(",")}) AND tool_names IS NULL
        ORDER BY timestamp DESC, id DESC
        LIMIT ?`,
     )
-    .all(cwd, limit) as Array<{ role: string; content: string; timestamp: string }>;
+    .all(...cwds, limit) as Array<{ role: string; content: string; timestamp: string }>;
 
   // Reverse to chronological order
   return rows.reverse();
 }
 
 /**
- * Get recent archived conversation summaries matching a source file pattern.
- * The pattern matches the encoded CWD in the source_file path
+ * Get recent archived conversation summaries matching any of the source file
+ * patterns (one per workspace folder). A pattern matches the encoded CWD in
+ * the source_file path
  * (e.g., '%encoded-cwd%' matches '~/.claude/projects/-Users-michael-Projects-foo/UUID.jsonl').
  *
  * Returns in chronological order (oldest first) so the injected context reads
  * naturally: earlier sessions listed first, most recent last.
  */
 export function getRecentArchivedSummaries(
-  sourceFilePattern: string,
+  sourceFilePatterns: string[],
   limit: number,
 ): Array<{ summary: string; firstMessageAt: string; lastMessageAt: string }> {
+  if (sourceFilePatterns.length === 0) return [];
   // Subquery grabs the N most recent, outer query re-sorts chronologically
   return getDb()
     .query(
       `SELECT summary, firstMessageAt, lastMessageAt FROM (
          SELECT summary, first_message_at AS firstMessageAt, last_message_at AS lastMessageAt
          FROM memory_conversations
-         WHERE source_file LIKE ?
+         WHERE (${likeAny(sourceFilePatterns)})
            AND status = 'archived'
            AND summary IS NOT NULL
            AND length(summary) > 0
@@ -723,7 +771,7 @@ export function getRecentArchivedSummaries(
          LIMIT ?
        ) ORDER BY lastMessageAt ASC`,
     )
-    .all(sourceFilePattern, limit) as Array<{
+    .all(...sourceFilePatterns, limit) as Array<{
     summary: string;
     firstMessageAt: string;
     lastMessageAt: string;

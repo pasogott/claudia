@@ -45,6 +45,7 @@ import {
   getQueuedCount,
   getActiveWorkItems,
   transitionActiveConversationsByCwd,
+  workspaceFoldersFor,
   getRecentTranscriptEntries,
   getRecentArchivedSummaries,
   searchMemory,
@@ -170,6 +171,11 @@ function formatElapsedSince(iso: string | null): string {
 function compactHomePath(path: string | null): string {
   if (!path) return "n/a";
   return path.replace(/^\/Users\/\w+/, "~");
+}
+
+/** A `source_file LIKE` pattern for the transcripts Claude Code keeps for `cwd`. */
+function slugPattern(cwd: string): string {
+  return `%${claudeProjectSlug(cwd)}/%`;
 }
 
 // Cache the episode-path Intl.DateTimeFormat per timezone. The formatter is
@@ -790,8 +796,11 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
       case "memory.transition_conversation": {
         const startedAt = Date.now();
         const cwd = params.cwd as string;
-        const pattern = `%${claudeProjectSlug(cwd)}/%`;
-        const changed = transitionActiveConversationsByCwd(pattern);
+        // Every folder of the workspace: switching away from a worktree
+        // session hands the whole project's open conversations to Libby.
+        const changed = transitionActiveConversationsByCwd(
+          workspaceFoldersFor(cwd).map(slugPattern),
+        );
 
         if (changed > 0) {
           ctx?.log.info("[memory] Transitioned active conversations to ready", {
@@ -863,16 +872,24 @@ export function createMemoryExtension(config: MemoryConfig = {}): AnimaExtension
           return { recentMessages: [], recentSummaries: [] };
         }
 
+        // Memory is per workspace (#107): a worktree or subfolder session sees
+        // the whole project's recent work, and the root sees the worktrees'.
+        // An excluded folder never contributes, even as part of a workspace.
+        const folders = workspaceFoldersFor(cwd).filter(
+          (folder) => !isWorkspaceExcluded(folder, basePath, cfg.exclude),
+        );
+
         // Recent transcript entries — query by cwd column (absolute path)
-        const recentMessages = getRecentTranscriptEntries(cwd, maxRecentMessages);
+        const recentMessages = getRecentTranscriptEntries(folders, maxRecentMessages);
 
         // Archived summaries are either workspace-scoped or global, depending on workspace mode.
-        const pattern = includeAllSummaries ? "%" : `%${claudeProjectSlug(cwd)}/%`;
-        const recentSummaries = getRecentArchivedSummaries(pattern, maxSummaries);
+        const patterns = includeAllSummaries ? ["%"] : folders.map(slugPattern);
+        const recentSummaries = getRecentArchivedSummaries(patterns, maxSummaries);
 
         ctx?.log.info("[memory] get_session_context completed", {
           elapsedMs: Date.now() - startedAt,
           cwd,
+          folders: folders.length,
           includeAllSummaries,
           recentMessages: recentMessages.length,
           recentSummaries: recentSummaries.length,
