@@ -91,7 +91,7 @@ export interface JsonSchema {
   description?: string;
   properties?: Record<string, JsonSchema>;
   required?: string[];
-  additionalProperties?: boolean;
+  additionalProperties?: boolean | JsonSchema;
   anyOf?: JsonSchema[];
   allOf?: JsonSchema[];
   enum?: unknown[];
@@ -392,12 +392,22 @@ export function validateParamsAgainstSchema(
     throw new Error(`Missing required params for ${method}: ${missing.join(", ")}`);
   }
 
+  // Closed unless the schema opens itself (`additionalProperties: true` or a
+  // schema, as the passthrough webhook targets do). Zod's input schemas say
+  // nothing either way, and reading silence as "anything goes" let a typo, or
+  // a param the method doesn't have, slip through while the CLI filled `cwd`
+  // in from the shell: `delete_workspace --id X` once deleted the shell's
+  // workspace instead of X. A flag the method doesn't know is an error.
   const properties = resolvedSchema.properties ?? {};
-  if (resolvedSchema.additionalProperties === false) {
-    const allowed = new Set(Object.keys(properties));
-    const unknown = Object.keys(params).filter((k) => !allowed.has(k));
+  const open =
+    resolvedSchema.additionalProperties !== undefined &&
+    resolvedSchema.additionalProperties !== false;
+  if (!open) {
+    const allowed = Object.keys(properties);
+    const unknown = Object.keys(params).filter((k) => !allowed.includes(k));
     if (unknown.length > 0) {
-      throw new Error(`Unknown params for ${method}: ${unknown.join(", ")}`);
+      const takes = allowed.length > 0 ? `it takes ${allowed.join(", ")}` : "it takes no params";
+      throw new Error(`Unknown params for ${method}: ${unknown.join(", ")} (${takes})`);
     }
   }
 

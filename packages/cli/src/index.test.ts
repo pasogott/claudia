@@ -261,6 +261,37 @@ describe("schema resolution and validation", () => {
     ).toThrow("Unknown params for session.send_prompt: extra");
   });
 
+  it("rejects params a schema doesn't declare, even when it says nothing about extras", () => {
+    // Zod's input schemas omit additionalProperties entirely.
+    const silent: JsonSchema = { type: "object", properties: { cwd: { type: "string" } } };
+    expect(() =>
+      validateParamsAgainstSchema(
+        "session.delete_workspace",
+        { id: "ws-1", cwd: "/where/the/shell/is" },
+        silent,
+      ),
+    ).toThrow("Unknown params for session.delete_workspace: id (it takes cwd)");
+    expect(() =>
+      validateParamsAgainstSchema(
+        "gateway.list_methods",
+        { verbose: true },
+        { type: "object", properties: {} },
+      ),
+    ).toThrow("it takes no params");
+  });
+
+  it("lets a schema that opens itself take any extra params", () => {
+    for (const additionalProperties of [true, {}]) {
+      expect(() =>
+        validateParamsAgainstSchema(
+          "support.handle_github",
+          { id: "d1", anything: "goes" },
+          { type: "object", properties: { id: { type: "string" } }, additionalProperties },
+        ),
+      ).not.toThrow();
+    }
+  });
+
   it("accepts valid payload", () => {
     expect(() =>
       validateParamsAgainstSchema(

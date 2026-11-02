@@ -96,11 +96,11 @@ anima dominatrix select --ref @e5 --value "option-1"
 Find elements by semantic attributes and perform actions. Each `find_*` method locates the element and executes an action in one call.
 
 ```bash
-anima dominatrix find_text --text "Posts" --action click
-anima dominatrix find_text --text "Email" --action fill --value "user@example.com"
-anima dominatrix find_label --label "Password" --action fill --value "secret"
-anima dominatrix find_role --role button --name "Submit" --action click
-anima dominatrix find_placeholder --placeholder "Search..." --action fill --value "query"
+anima dominatrix find_text --text "Posts" --perform click
+anima dominatrix find_text --text "Email" --perform fill --value "user@example.com"
+anima dominatrix find_label --label "Password" --perform fill --value "secret"
+anima dominatrix find_role --role button --name "Submit" --perform click
+anima dominatrix find_placeholder --placeholder "Search..." --perform fill --value "query"
 ```
 
 **Gateway methods:**
