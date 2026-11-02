@@ -422,6 +422,7 @@ bun run typecheck        # tsgo (TypeScript native preview)
 - When a branch does exist, **fast-forward merge** into `main`: `git checkout main && git merge --ff-only <branch>`. No merge commits, no squash — keep history linear.
 - If the branch has fallen behind, **rebase onto `main`** before ff-merging so the ff succeeds cleanly.
 - After ff-merge, push `main` and delete the local branch.
+- **After every push to `main`, update Anima Sedes** with the `updating-anima-sedes` skill (`--check`, then `update`), and reload vesuvius (`anima watchdog reload`). Both machines run `main`; neither is allowed to drift.
 - **When the work resolves a GitHub issue, include `Closes #N` (or `Fixes #N`) in the commit message body** — that auto-closes the issue when `main` is pushed, no manual `gh issue close` needed.
 
 ## Code Style
