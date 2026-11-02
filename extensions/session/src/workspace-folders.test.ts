@@ -3,15 +3,9 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { findGitLayout, worktreesConventionRoot } from "./git-layout";
-import {
-  addWorkspaceFolder,
-  closeDb,
-  createWorkspace,
-  getOrCreateWorkspace,
-  getWorkspaceByCwd,
-  listWorkspaceFolders,
-  resolveWorkspaceForCwd,
-} from "./workspace";
+import { createWorkspace, getOrCreateWorkspace } from "./workspace";
+import { closeDb, getWorkspaceByCwd, listWorkspaceFolders } from "./workspace-db";
+import { addWorkspaceFolder, resolveWorkspaceForCwd } from "./workspace-folders";
 
 function git(cwd: string, ...args: string[]): void {
   const result = Bun.spawnSync(["git", "-C", cwd, ...args], { stdout: "pipe", stderr: "pipe" });

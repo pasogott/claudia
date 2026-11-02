@@ -4,7 +4,8 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import * as os from "node:os";
 import { closeSessionDb, getStoredSession, touchSession, upsertSession } from "./session-store";
 import { SessionRegistry } from "./session-registry";
-import { closeDb as closeWorkspaceDb, listWorkspaces } from "./workspace";
+import { closeDb as closeWorkspaceDb } from "./workspace-db";
+import { listWorkspaces } from "./workspace";
 import type { AgentHostSessionInfo } from "./session-types";
 
 /**

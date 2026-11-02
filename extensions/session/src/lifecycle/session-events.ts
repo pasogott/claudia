@@ -2,7 +2,7 @@ import { getStoredSession, touchSession, updateSessionMetadata } from "../sessio
 import { applyRuntimeStatus, emitActivity, forgetActivity } from "../session-status-events";
 import { toRuntimeStatusFromModalEvent, toRuntimeStatusFromSessionEvent } from "../session-types";
 import { getRuntime } from "../runtime";
-import { getWorkspace } from "../workspace";
+import { getWorkspace } from "../workspace-db";
 import { collectGitStatus } from "../git-status";
 import { cancelPendingGitStatus, noteToolResult, noteToolUseStart } from "./git-status-debouncer";
 import { createLogger, shortId, truncatePreservingSurrogates } from "@anima/shared";

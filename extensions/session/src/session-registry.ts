@@ -11,14 +11,13 @@ import {
   detectGithubRepo,
   findWorkspace,
   getOrCreateWorkspace,
-  getWorkspace,
-  getWorkspaceByCwd,
   listWorkspaces,
   setWorkspacePinned,
   updateWorkspaceProject,
   type WorkspaceProjectFields,
   type WorkspaceQuery,
 } from "./workspace";
+import { getWorkspace, getWorkspaceByCwd } from "./workspace-db";
 
 export class SessionRegistry {
   updateWorkspaceProject(id: string, fields: WorkspaceProjectFields) {

@@ -3,7 +3,8 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { closeDb, createWorkspace } from "./workspace";
+import { closeDb } from "./workspace-db";
+import { createWorkspace } from "./workspace";
 import {
   closeSessionDb,
   getRefsForSessions,

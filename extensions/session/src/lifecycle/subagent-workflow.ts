@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { listSubagentSessions, setSessionProfile } from "../session-store";
 import type { StoredSession } from "../session-store";
-import { getWorkspace } from "../workspace";
+import { getWorkspace } from "../workspace-db";
 import type { AgentHostSessionInfo, RequestContext } from "../session-types";
 import { getRuntime } from "../runtime";
 

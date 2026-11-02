@@ -3,17 +3,15 @@ import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import {
-  closeDb,
   createWorkspace,
   deleteWorkspace,
   findWorkspace,
   getOrCreateWorkspace,
-  getWorkspace,
-  getWorkspaceByCwd,
   listWorkspaces,
   parseGithubRemote,
   updateWorkspaceProject,
 } from "./workspace";
+import { closeDb, getWorkspace, getWorkspaceByCwd } from "./workspace-db";
 
 describe("workspace db", () => {
   let dataDir: string;

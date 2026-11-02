@@ -15,7 +15,7 @@ import { homedir } from "node:os";
 import { AgentHostClient } from "./agent-client";
 import type { AgentHostSessionInfo, SessionRuntimeConfig } from "./session-types";
 import type { SessionSubagent } from "./lifecycle/subagent-workflow";
-import { closeDb } from "./workspace";
+import { closeDb } from "./workspace-db";
 import { LEGACY_SESSION_PROFILE, closeSessionDb, getSessionProfile } from "./session-store";
 import { wireSessionEvents } from "./lifecycle/session-events";
 import { startReconciler } from "./session-reconciler";

@@ -11,7 +11,8 @@ import { claudeProjectDir } from "@anima/shared";
 import { listConventionWorktrees } from "./git-layout";
 import { foldersToSweep, reconcileWorkspace } from "./session-reconciler";
 import { closeSessionDb, getStoredSession, upsertSession } from "./session-store";
-import { closeDb, createWorkspace, getWorkspaceFolder, type Workspace } from "./workspace";
+import { closeDb, getWorkspaceFolder, type Workspace } from "./workspace-db";
+import { createWorkspace } from "./workspace";
 import { initRuntime, resetRuntime, type SessionRuntime } from "./runtime";
 
 const DAY = 24 * 3_600_000;

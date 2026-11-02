@@ -4,7 +4,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import * as os from "node:os";
 import { cleanSnippet, hitTitle, searchSessions, toMatchQuery } from "./session-search";
 import { closeSessionDb, setSessionRefs, upsertSession } from "./session-store";
-import { createWorkspace, closeDb } from "./workspace";
+import { createWorkspace } from "./workspace";
+import { closeDb } from "./workspace-db";
 
 describe("toMatchQuery", () => {
   it("quotes each word so punctuation can't be read as FTS syntax", () => {

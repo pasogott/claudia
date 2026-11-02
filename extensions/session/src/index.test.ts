@@ -6,6 +6,7 @@ import { AgentHostClient } from "./agent-client";
 import { getStoredSession, upsertSession } from "./session-store";
 import { discoverSessions, resolveProjectDir } from "./claude-projects";
 import * as workspace from "./workspace";
+import * as workspaceDb from "./workspace-db";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as os from "node:os";
@@ -240,7 +241,7 @@ describe("session extension", () => {
         deletedAt: null,
       },
     ]);
-    getWorkspaceSpy = spyOn(workspace, "getWorkspace").mockReturnValue({
+    getWorkspaceSpy = spyOn(workspaceDb, "getWorkspace").mockReturnValue({
       id: "ws-1",
       name: "project",
       cwd: "/repo/project",
@@ -279,7 +280,7 @@ describe("session extension", () => {
         created: true,
       }),
     );
-    closeDbSpy = spyOn(workspace, "closeDb").mockImplementation(() => {});
+    closeDbSpy = spyOn(workspaceDb, "closeDb").mockImplementation(() => {});
 
     promptSpy = spyOn(AgentHostClient.prototype, "prompt").mockImplementation(function (
       this: AgentHostClient,

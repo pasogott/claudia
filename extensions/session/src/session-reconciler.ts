@@ -29,7 +29,8 @@ import {
   type SessionListInfo,
   type StoredSessionRef,
 } from "./session-store";
-import { getWorkspaceFolder, listWorkspaceFolders, resolveWorkspaceForCwd } from "./workspace";
+import { getWorkspaceFolder, listWorkspaceFolders } from "./workspace-db";
+import { resolveWorkspaceForCwd } from "./workspace-folders";
 import { listConventionWorktrees } from "./git-layout";
 import type { RefsConfig } from "./session-refs";
 import { parseGithubRemote, readRefsConfig } from "./session-refs";

@@ -29,7 +29,7 @@ import { createLogger, shortId } from "@anima/shared";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { getRuntime } from "./runtime";
-import { getWorkspace } from "./workspace";
+import { getWorkspace } from "./workspace-db";
 import {
   getSessionDb,
   getStoredSession,
