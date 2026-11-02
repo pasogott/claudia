@@ -156,6 +156,25 @@ describe("workspace folder operations", () => {
     });
   });
 
+  it("merges the workspace of a removed worktree in as an inactive worktree", () => {
+    const gone = join(`${root}.worktrees`, "pr-6");
+    const other = createWorkspace({ name: "pr-6", cwd: gone });
+    const old = id("ses-gone");
+    session(old, other.id, gone);
+
+    const result = addFolder(workspace.id, gone, { merge: true });
+
+    expect(getWorkspaceFolder(gone)).toMatchObject({ workspaceId: workspace.id, kind: "worktree" });
+    expect(getWorkspaceFolder(gone)?.inactiveAt).not.toBeNull();
+    expect(getStoredSession(old)?.workspaceId).toBe(workspace.id);
+    expect(existsSync(claudeProjectDir(gone))).toBe(false);
+    expect(result.notes.join("\n")).toContain("joined inactive");
+  });
+
+  it("still refuses to add a folder that doesn't exist", () => {
+    expect(() => addFolder(workspace.id, join(home, "nope"))).toThrow(/Not a directory/);
+  });
+
   describe("removeFolder", () => {
     it("refuses the root", () => {
       expect(() => removeFolder(workspace.id, root)).toThrow(/set another root first/);

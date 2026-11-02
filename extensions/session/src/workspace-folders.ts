@@ -159,10 +159,12 @@ function result(workspaceId: string, notes: string[]): FolderOperationResult {
 
 /**
  * The kind a folder joins `workspace` as: a git worktree of one of its
- * folders is a `worktree`, anything else is `added`.
+ * folders (or a gone folder under `<member>.worktrees/`) is a `worktree`,
+ * anything else is `added`.
  */
 function joiningKind(workspace: Workspace, path: string): Exclude<WorkspaceFolderKind, "root"> {
-  const mainRepo = findGitLayout(path)?.mainRepo;
+  const git = findGitLayout(path);
+  const mainRepo = git?.mainRepo ?? (git ? null : worktreesConventionRoot(path));
   return mainRepo && getWorkspaceFolder(mainRepo)?.workspaceId === workspace.id
     ? "worktree"
     : "added";
@@ -183,7 +185,8 @@ function pinRootlessSessions(workspace: Workspace): void {
  * Add a folder to a workspace. A folder that is another workspace's root
  * merges that workspace in when `merge` is set (its sessions, folders and
  * support tickets move over, its project fields are folded in, and it is
- * deleted); otherwise it's refused.
+ * deleted); otherwise it's refused. That root may be gone from disk (a
+ * removed worktree): it then joins inactive.
  * An inactive folder of this workspace is made active again.
  */
 export function addFolder(
@@ -193,12 +196,12 @@ export function addFolder(
 ): FolderOperationResult {
   const workspace = requireWorkspace(workspaceId);
   const path = normalizeFolderPath(rawPath);
-  requireDirectory(path);
   const notes: string[] = [];
 
   const existing = getWorkspaceFolder(path);
   if (existing?.workspaceId === workspace.id) {
     if (existing.inactiveAt) {
+      requireDirectory(path);
       getWorkspaceDb()
         .query("UPDATE workspace_folders SET inactive_at = NULL WHERE path = ?")
         .run(path);
@@ -222,9 +225,16 @@ export function addFolder(
       );
     }
     notes.push(...mergeWorkspace(owner, workspace));
+    if (!existsSync(path)) {
+      getWorkspaceDb()
+        .query("UPDATE workspace_folders SET inactive_at = datetime('now') WHERE path = ?")
+        .run(path);
+      notes.push(`${path} is gone, so it joined inactive`);
+    }
     return result(workspace.id, notes);
   }
 
+  requireDirectory(path);
   const kind = joiningKind(workspace, path);
   addWorkspaceFolder(workspace.id, path, kind);
   notes.push(`added ${path} (${kind})`);
@@ -290,7 +300,9 @@ function mergeWorkspace(source: Workspace, target: Workspace): string[] {
     `merged workspace ${source.name} (${source.id}): ${sessions} sessions, ${folders} folders` +
       (tickets ? `, ${tickets} support tickets` : ""),
   ];
-  if (rootKind === "added") notes.push(linkAutoMemory(target.cwd, source.cwd));
+  if (rootKind === "added" && existsSync(source.cwd)) {
+    notes.push(linkAutoMemory(target.cwd, source.cwd));
+  }
   return notes;
 }
 
