@@ -182,7 +182,8 @@ function pinRootlessSessions(workspace: Workspace): void {
 /**
  * Add a folder to a workspace. A folder that is another workspace's root
  * merges that workspace in when `merge` is set (its sessions, folders and
- * support tickets move over, and it is soft-deleted); otherwise it's refused.
+ * support tickets move over, its project fields are folded in, and it is
+ * deleted); otherwise it's refused.
  * An inactive folder of this workspace is made active again.
  */
 export function addFolder(
@@ -233,18 +234,35 @@ export function addFolder(
 
 /**
  * Merge `source` into `target`: every session, folder and support ticket of
- * `source` moves to `target`, and `source` is soft-deleted. Its root joins as
- * a `worktree` when it is one of the target's repo, otherwise as `added`.
+ * `source` moves to `target`, its project fields are folded in (lists joined;
+ * repo and description only where `target` has none), and the `source` row is
+ * deleted, since nothing points at it any more and its root path must be free
+ * to become `target`'s. Its root joins as a `worktree` when it is one of the
+ * target's repo, otherwise as `added`.
  */
 function mergeWorkspace(source: Workspace, target: Workspace): string[] {
   if (source.id === target.id) return [];
   const db = getWorkspaceDb();
   const rootKind = joiningKind(target, source.cwd);
+  const joined = (a: string[], b: string[]) => JSON.stringify([...new Set([...a, ...b])]);
   let sessions = 0;
   let folders = 0;
   let tickets = 0;
 
   db.transaction(() => {
+    const current = getWorkspace(target.id) ?? target;
+    db.query(
+      `UPDATE workspaces SET aliases = ?, email_domains = ?, sentry_projects = ?,
+         github_repo = COALESCE(github_repo, ?), description = COALESCE(description, ?)
+       WHERE id = ?`,
+    ).run(
+      joined(current.aliases, source.aliases),
+      joined(current.emailDomains, source.emailDomains),
+      joined(current.sentryProjects, source.sentryProjects),
+      source.githubRepo,
+      source.description,
+      target.id,
+    );
     pinRootlessSessions(source);
     sessions = db
       .query("UPDATE sessions SET workspace_id = ? WHERE workspace_id = ?")
@@ -264,9 +282,7 @@ function mergeWorkspace(source: Workspace, target: Workspace): string[] {
         .query("UPDATE support_tickets SET workspace_id = ? WHERE workspace_id = ?")
         .run(target.id, source.id).changes;
     }
-    db.query(
-      "UPDATE workspaces SET deleted_at = datetime('now'), pinned = 0 WHERE id = ? AND deleted_at IS NULL",
-    ).run(source.id);
+    db.query("DELETE FROM workspaces WHERE id = ?").run(source.id);
   })();
 
   log.info("Merged workspace", { from: source.id, into: target.id, sessions, folders, tickets });

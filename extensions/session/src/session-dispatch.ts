@@ -572,12 +572,41 @@ export function createSessionWriteHandlers(): Record<string, SessionMethodHandle
         ? rt.registry.getWorkspace(p.id)
         : rt.registry.getWorkspaceByCwd(expandHome(p.cwd as string));
       if (!workspace) throw new Error(`Unknown workspace: ${p.id ?? p.cwd}`);
-      const { id: _id, cwd: _cwd, detect, ...fields } = p;
+      const {
+        id: _id,
+        cwd: _cwd,
+        detect,
+        addFolder,
+        removeFolder,
+        setRoot,
+        moveFolder,
+        merge,
+        ...fields
+      } = p;
+
+      const notes: string[] = [];
+      const folderOps = rt.registry.workspaceFolders;
+      const toAdd = addFolder === undefined ? [] : [addFolder].flat();
+      for (const path of toAdd) notes.push(...folderOps.add(workspace.id, path, { merge }).notes);
+      if (moveFolder) {
+        notes.push(
+          ...folderOps.move(workspace.id, moveFolder.from, moveFolder.to, { merge }).notes,
+        );
+      }
+      if (setRoot) notes.push(...folderOps.setRoot(workspace.id, setRoot).notes);
+      if (removeFolder) notes.push(...folderOps.remove(workspace.id, removeFolder).notes);
+
+      // A moved or re-rooted workspace has a new cwd for detection.
+      const current = rt.registry.getWorkspace(workspace.id) ?? workspace;
       if (detect && fields.githubRepo === undefined) {
-        const detected = rt.registry.detectGithubRepo(workspace.cwd);
+        const detected = rt.registry.detectGithubRepo(current.cwd);
         if (detected) fields.githubRepo = detected;
       }
-      return { workspace: rt.registry.updateWorkspaceProject(workspace.id, fields) };
+      return {
+        workspace: rt.registry.updateWorkspaceProject(workspace.id, fields),
+        folders: folderOps.list(workspace.id),
+        notes,
+      };
     },
     "session.find_workspace": async (params) => {
       const rt = getRuntime();

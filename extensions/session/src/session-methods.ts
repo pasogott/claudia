@@ -85,6 +85,37 @@ export const workspaceUpdateSchema = z
       .max(20)
       .optional(),
     detect: z.boolean().default(false).describe("Fill githubRepo from the git origin remote"),
+    addFolder: z
+      .union([z.string().min(1), z.array(z.string().min(1)).min(1).max(20)])
+      .optional()
+      .describe(
+        "Folder(s) to add. A worktree of a member repo joins as a worktree; any other folder joins as added and gets the root's Claude Code auto memory linked in",
+      ),
+    removeFolder: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Folder to take out of the workspace (not the root)"),
+    setRoot: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Active folder to make the root (the source of shared tmp/ and auto memory)"),
+    moveFolder: z
+      .object({
+        from: z.string().min(1).describe("The folder's old path (a member of this workspace)"),
+        to: z.string().min(1).describe("Where it is now; must exist"),
+      })
+      .optional()
+      .describe(
+        "Record a folder moved by hand: the new path joins (as root if the old one was), the old one stays as an inactive member, its sessions get the new path, and their transcript folders are linked at the new path",
+      ),
+    merge: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Let addFolder or moveFolder take a folder that is another workspace's root: that workspace's sessions, folders and support tickets move here, its project fields are folded in, and it is deleted",
+      ),
   })
   .refine((p) => p.id || p.cwd, "Pass id or cwd");
 
@@ -480,7 +511,7 @@ export const sessionMethodDefinitions: ExtensionMethodDefinition[] = [
   {
     name: "session.update_workspace",
     description:
-      "Set a workspace's project fields (description, aliases, email domains, GitHub repo, Sentry projects). Omitted fields are unchanged; null clears. detect: true fills githubRepo from the git origin remote when it isn't given.",
+      "Set a workspace's project fields (description, aliases, email domains, GitHub repo, Sentry projects) and folders (addFolder, removeFolder, setRoot, moveFolder; applied in that order, before the fields). Omitted fields are unchanged; null clears. detect: true fills githubRepo from the git origin remote when it isn't given. Returns the workspace, its folders, and notes on what each folder operation did.",
     inputSchema: workspaceUpdateSchema,
     execution: { lane: "write", concurrency: "serial" },
   },

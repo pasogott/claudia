@@ -17,9 +17,19 @@ import {
   type WorkspaceProjectFields,
   type WorkspaceQuery,
 } from "./workspace";
-import { getWorkspace, getWorkspaceByCwd } from "./workspace-db";
+import { getWorkspace, getWorkspaceByCwd, listWorkspaceFolders } from "./workspace-db";
+import { addFolder, moveFolder, removeFolder, setRoot } from "./workspace-folders";
 
 export class SessionRegistry {
+  /** Folder membership operations (#107), behind `session.update_workspace`. */
+  readonly workspaceFolders = {
+    add: addFolder,
+    remove: removeFolder,
+    setRoot,
+    move: moveFolder,
+    list: listWorkspaceFolders,
+  };
+
   updateWorkspaceProject(id: string, fields: WorkspaceProjectFields) {
     return updateWorkspaceProject(id, fields);
   }
